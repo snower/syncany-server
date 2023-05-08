@@ -27,7 +27,7 @@ else:
     long_description = 'https://github.com/snower/syncany-server'
 
 setup(
-    name='syncany_server',
+    name='syncanyserver',
     version=version,
     url='https://github.com/snower/syncany-server',
     author='snower',
@@ -58,7 +58,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'syncany-server = syncany_server.main:main',
+            'syncany-server = syncanyserver.main:main',
         ],
     },
     description='Simple and easy-to-use sql execution engine',

@@ -26,6 +26,12 @@ class UserIdentityProvider(IdentityProvider):
             )
         return None
 
+    async def get_databases(self, username):
+        self.load_users()
+
+        user = self.users.get(username)
+        return user["databases"] if user and "databases" in user else None
+
     def load_users(self):
         if self.users is not None:
             return
