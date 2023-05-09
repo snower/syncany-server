@@ -3,6 +3,7 @@
 # create by: snower
 
 import os
+import time
 from collections import defaultdict
 from sqlglot import expressions as sqlglot_expressions
 from mysql_mimic import Session, MysqlServer
@@ -43,18 +44,16 @@ class ServerSessionExecuterContext(ExecuterContext):
             sqls = sql_parser.split()
         else:
             sqls = [sql] if not isinstance(sql, list) else sql
-        self.session.execute_index += 1
         with self.executor as executor:
-            executor.run("session[%d_%d]" % (id(self), self.session.execute_index), sqls)
+            executor.run("session[%d-%d]" % (id(self.session), self.session.execute_index), sqls)
             exit_code = executor.execute()
             if exit_code is not None and exit_code != 0:
                 raise ExecuterError(exit_code)
         return 0
 
     def execute_segments(self, sql_segments):
-        self.session.execute_index += 1
         with self.executor as executor:
-            executor.run("session[%d_%d]" % (id(self), self.session.execute_index), sql_segments)
+            executor.run("session[%d-%d]" % (id(self.session), self.session.execute_index), sql_segments)
             exit_code = executor.execute()
             if exit_code is not None and exit_code != 0:
                 raise ExecuterError(exit_code)
@@ -63,19 +62,17 @@ class ServerSessionExecuterContext(ExecuterContext):
     def execute_file(self, filename):
         sql_parser = FileParser(filename)
         sqls = sql_parser.load()
-        self.session.execute_index += 1
         with self.executor as executor:
-            executor.run("session[%s-%d]%s" % (id(self), self.session.execute_index, filename), sqls)
+            executor.run("session[%s-%d]%s" % (id(self.session), self.session.execute_index, filename), sqls)
             exit_code = executor.execute()
             if exit_code is not None and exit_code != 0:
                 raise ExecuterError(exit_code)
         return 0
 
     def execute_expression(self, expression, output_name=None):
-        self.session.execute_index += 1
         with self.executor as executor:
             config = executor.session_config.get()
-            config["name"] = "session[%s-%d]" % (id(self), self.session.execute_index)
+            config["name"] = "session[%s-%d]" % (id(self.session), self.session.execute_index)
             try:
                 compiler = Compiler(config, executor.env_variables)
                 arguments = {"@verbose": executor.env_variables.get("@verbose", False),
@@ -150,7 +147,16 @@ class ServerSession(Session):
             return [], []
         if "performance_schema" in sql:
             return [], []
+        start_time = time.time()
+        try:
+            self.execute_index += 1
+            get_logger().info("session[%d-%d] query SQL: %s", id(self), self.execute_index, sql.replace("\n", " "))
+            return await self.execute_query(expression)
+        finally:
+            get_logger().info("session[%d-%d] query SQL finish %.2fms", id(self), self.execute_index,
+                              (time.time() - start_time) * 1000)
 
+    async def execute_query(self, expression):
         with self.executer_context.context(self) as executer_context:
             primary_tables = self.parse_primary_tables(expression, defaultdict(list))
             if primary_tables:
@@ -171,7 +177,7 @@ class ServerSession(Session):
                 executer_context.execute_expression(expression)
                 return [], []
 
-            collection_name = "__session_execute_%d_%d" % (id(self), self.execute_index + 1)
+            collection_name = "__session_execute_%d_%d" % (id(self), self.execute_index)
             executer_context.execute_expression(expression, "--." + collection_name)
             datas = executer_context.pop_memory_datas(collection_name)
             if not datas:
@@ -203,8 +209,7 @@ class ServerSession(Session):
                           executer_context.executor) as executor:
                 table_variable_sqls = variable_sqls.get((database_name, table_name))
                 if table_variable_sqls:
-                    self.execute_index += 1
-                    executor.run("session[%d_%d]" % (id(self), self.execute_index),
+                    executor.run("session[%d-%d]" % (id(self), self.execute_index),
                                  [SqlSegment(table_variable_sqls[i], i + 1) for i in range(len(table_variable_sqls))])
                     exit_code = executor.execute()
                     if exit_code is not None and exit_code != 0:
@@ -212,7 +217,6 @@ class ServerSession(Session):
 
                 sql_parser = FileParser(table.filename)
                 sqls = sql_parser.load()
-                self.execute_index += 1
                 executor.run("session[%s-%d]%s" % (id(self), self.execute_index, table.filename), sqls)
                 exit_code = executor.execute()
                 if exit_code is not None and exit_code != 0:
@@ -280,6 +284,8 @@ class ServerSession(Session):
             elif isinstance(condition_expression, sqlglot_expressions.EQ):
                 if not isinstance(condition_expression.args["this"], sqlglot_expressions.Column):
                     return
+                if self.has_column(condition_expression.args["expression"]):
+                    return
                 if "table" in condition_expression.args["this"].args:
                     condition_table_name = condition_expression.args["this"].args["table"].name
                     if condition_table_name and condition_table_name != table_alias:
@@ -291,6 +297,8 @@ class ServerSession(Session):
                                                    sqlglot_expressions.LT, sqlglot_expressions.LTE,
                                                    sqlglot_expressions.NEQ)):
                 if not isinstance(condition_expression.args["this"], sqlglot_expressions.Column):
+                    return
+                if self.has_column(condition_expression.args["expression"]):
                     return
                 if "table" in condition_expression.args["this"].args:
                     condition_table_name = condition_expression.args["this"].args["table"].name
@@ -358,6 +366,8 @@ class ServerSession(Session):
             elif isinstance(condition_expression, sqlglot_expressions.EQ):
                 if not isinstance(condition_expression.args["this"], sqlglot_expressions.Column):
                     return
+                if self.has_column(condition_expression.args["expression"]):
+                    return
                 if "table" in condition_expression.args["this"].args:
                     condition_table_name = condition_expression.args["this"].args["table"].name
                     if condition_table_name and condition_table_name != table_alias:
@@ -369,6 +379,8 @@ class ServerSession(Session):
                                                    sqlglot_expressions.LT, sqlglot_expressions.LTE,
                                                    sqlglot_expressions.NEQ)):
                 if not isinstance(condition_expression.args["this"], sqlglot_expressions.Column):
+                    return
+                if self.has_column(condition_expression.args["expression"]):
                     return
                 if "table" in condition_expression.args["this"].args:
                     condition_table_name = condition_expression.args["this"].args["table"].name
@@ -389,6 +401,23 @@ class ServerSession(Session):
                                if table_expression.args.get("alias") else table_expression.args["this"].name,
                                join_expression.args["on"])
         return joins_variable_sqls
+
+    def has_column(self, expression):
+        if not isinstance(expression, sqlglot_expressions.Expression):
+            return False
+        if isinstance(expression, (sqlglot_expressions.Column, sqlglot_expressions.Select,
+                                   sqlglot_expressions.Subquery, sqlglot_expressions.Union)):
+            return True
+
+        for name, child_expression in expression.args.items():
+            if isinstance(child_expression, list):
+                for child_expression_item in child_expression:
+                    if self.has_column(child_expression_item):
+                        return True
+                continue
+            if self.has_column(child_expression):
+                return True
+        return False
 
     def load_databases(self, user_databases):
         databases = {}
