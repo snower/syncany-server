@@ -2,8 +2,14 @@
 # 2023/5/5
 # create by: snower
 
+import os
+from syncany.logger import get_logger
 from syncany.database.database import DatabaseManager as BaseDatabaseManager, DatabaseDriver
+from syncanysql.executor import Executor
+from syncanysql.parser import FileParser
+from syncanysql.taskers.query import QueryTasker
 from syncanysql import ExecuterContext
+from .table import Table
 
 
 class DatabaseManager(BaseDatabaseManager):
@@ -41,3 +47,47 @@ class Database(object):
             if table.name == table_name:
                 return table
         return None
+
+    @classmethod
+    def scan_databases(cls, script_engine, databases):
+        new_databases = {}
+        basepath = os.getcwd()
+        for dirname in ([basepath] + list(os.listdir(basepath))):
+            dirpath = basepath if dirname == basepath else os.path.join(basepath, dirname)
+            if not os.path.isdir(dirpath) or (dirname != basepath and not dirname.isidentifier()):
+                continue
+            database_name = "cwd" if dirname == basepath else dirname
+
+            tables = []
+            for filename in os.listdir(dirpath):
+                if not os.path.isfile(os.path.join(dirpath, filename)):
+                    continue
+                table_name, fileext = os.path.splitext(filename)
+                if fileext not in (".sql", ".sqlx"):
+                    continue
+                filename = os.path.join(dirpath, filename)
+                try:
+                    sql_parser = FileParser(filename)
+                    sqls = sql_parser.load()
+                    executor = Executor(script_engine.manager, script_engine.executor.session_config.session(),
+                                        script_engine.executor)
+                    executor.run("scan", sqls)
+                    if not executor.runners:
+                        continue
+                    for tasker in executor.runners:
+                        if not isinstance(tasker, QueryTasker):
+                            continue
+                        if ("&.--." + table_name) in tasker.config["output"]:
+                            table_name = tasker.config["output"].split("&.--.")[-1].split("::")[0]
+                            tables.append(Table(table_name, filename, Table.parse_schema(tasker)))
+                        tasker.tasker.close()
+                except Exception as e:
+                    get_logger().warning("load database file error %s %s", filename, str(e))
+            if not tables:
+                continue
+            new_databases[database_name] = Database(database_name, tables)
+        databases.clear()
+        databases.update(new_databases)
+        get_logger().info("scan databases finish, find databases: %s", ",".join(list(databases.keys())))
+
+

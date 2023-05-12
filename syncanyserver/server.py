@@ -2,15 +2,13 @@
 # 2023/5/4
 # create by: snower
 
-import os
 import time
 from collections import defaultdict
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from sqlglot import expressions as sqlglot_expressions
 from mysql_mimic import Session, MysqlServer
-from mysql_mimic.results import infer_type, ColumnType
 from syncany.logger import get_logger
-from syncany.filters import IntFilter, FloatFilter, StringFilter, BytesFilter, BooleanFilter, \
-    DateTimeFilter, DateFilter, TimeFilter, ObjectIdFilter, UUIDFilter
 from syncany.taskers.manager import TaskerManager
 from syncany.database.memory import MemoryDBCollection
 from syncanysql.compiler import Compiler
@@ -19,7 +17,6 @@ from syncanysql import ScriptEngine, Executor, ExecuterContext, SqlSegment, SqlP
 from syncanysql.parser import FileParser
 from .user import UserIdentityProvider
 from .database import DatabaseManager, Database
-from .table import Table
 
 
 class ServerSessionExecuterContext(ExecuterContext):
@@ -98,13 +95,15 @@ class ServerSessionExecuterContext(ExecuterContext):
 
 
 class ServerSession(Session):
-    def __init__(self, executer_context, identity_provider, *args, **kwargs):
+    def __init__(self, executer_context, identity_provider, thread_pool_executor, databases, *args, **kwargs):
         super(ServerSession, self).__init__(*args, **kwargs)
 
+        self.loop = asyncio.get_event_loop()
         self.executer_context = executer_context
         self.identity_provider = identity_provider
+        self.thread_pool_executor = thread_pool_executor
+        self.databases = databases
         self.execute_index = 0
-        self.databases = None
 
     async def handle_query(self, sql, attrs):
         if sql[:5].lower() == "show " or sql[:4].lower() == "set " or sql[:5].lower() == "kill " \
@@ -139,11 +138,13 @@ class ServerSession(Session):
         return await super(ServerSession, self).handle_query(sql, attrs)
 
     async def query(self, expression, sql, attrs):
-        if self.databases is None:
-            self.load_databases(await self.identity_provider.get_databases(self.username))
-
         if not isinstance(expression, (sqlglot_expressions.Insert, sqlglot_expressions.Delete,
                                        sqlglot_expressions.Select, sqlglot_expressions.Union)):
+            if sql.lower().startswith("flush"):
+                await self.loop.run_in_executor(self.thread_pool_executor, Database.scan_databases,
+                                                self.executer_context.engine, self.databases)
+                return [(database.name, table.name, table.filename) for database in self.databases.values()
+                        for table in database.tables], ["database", "table", "filename"]
             return [], []
         if "performance_schema" in sql:
             return [], []
@@ -151,12 +152,19 @@ class ServerSession(Session):
         try:
             self.execute_index += 1
             get_logger().info("session[%d-%d] query SQL: %s", id(self), self.execute_index, sql.replace("\n", " "))
-            return await self.execute_query(expression)
+            return await self.loop.run_in_executor(self.thread_pool_executor, self.execute_query, expression, start_time)
         finally:
             get_logger().info("session[%d-%d] query SQL finish %.2fms", id(self), self.execute_index,
                               (time.time() - start_time) * 1000)
 
-    async def execute_query(self, expression):
+    def execute_query(self, expression, start_time):
+        executor_wait_timeout = self.variables.values.get("wait_timeout")
+        if not executor_wait_timeout:
+            session_config = self.executer_context.executor.session_config.get()
+            executor_wait_timeout = session_config.get("executor_wait_timeout") or 120
+        if start_time + int(executor_wait_timeout) <= time.time():
+            raise TimeoutError("query execute wait timeout")
+
         with self.executer_context.context(self) as executer_context:
             primary_tables = self.parse_primary_tables(expression, defaultdict(list))
             if primary_tables:
@@ -186,14 +194,12 @@ class ServerSession(Session):
             return [tuple(data[key] for key in keys) for data in datas], keys
 
     async def schema(self):
-        if self.databases is None:
-            self.load_databases(await self.identity_provider.get_databases(self.username))
+        user_databases = await self.identity_provider.get_databases(self.username)
         return {name: {table.name: table.schema for table in database.tables if table.schema}
-                for name, database in self.databases.items()}
+                for name, database in self.databases.items()
+                if not user_databases or name in user_databases}
 
     async def use(self, database):
-        if self.databases is None:
-            self.load_databases(await self.identity_provider.get_databases(self.username))
         await super(ServerSession, self).use(database)
         self.executer_context.memory_database_collection.clear()
 
@@ -419,82 +425,14 @@ class ServerSession(Session):
                 return True
         return False
 
-    def load_databases(self, user_databases):
-        databases = {}
-        basepath = os.getcwd()
-        for dirname in ([basepath] + list(os.listdir(basepath))):
-            dirpath = basepath if dirname == basepath else os.path.join(basepath, dirname)
-            if not os.path.isdir(dirpath) or (dirname != basepath and not dirname.isidentifier()):
-                continue
-            database_name = "cwd" if dirname == basepath else dirname
-            if user_databases and database_name not in user_databases:
-                continue
-
-            tables = []
-            for filename in os.listdir(dirpath):
-                if not os.path.isfile(os.path.join(dirpath, filename)):
-                    continue
-                table_name, fileext = os.path.splitext(filename)
-                if fileext not in (".sql", ".sqlx"):
-                    continue
-                filename = os.path.join(dirpath, filename)
-                try:
-                    sql_parser = FileParser(filename)
-                    sqls = sql_parser.load()
-                    executor = Executor(self.executer_context.engine.manager,
-                                        self.executer_context.executor.session_config.session(),
-                                        self.executer_context.executor)
-                    executor.run("session[%d]" % id(self), sqls)
-                    if not executor.runners:
-                        continue
-                    for tasker in executor.runners:
-                        if not isinstance(tasker, QueryTasker):
-                            continue
-                        if ("&.--." + table_name) in tasker.config["output"]:
-                            table_name = tasker.config["output"].split("&.--.")[-1].split("::")[0]
-                            tables.append(Table(table_name, filename, self.load_table_schema(tasker)))
-                        tasker.tasker.close()
-                except Exception as e:
-                    get_logger().warning("load database file error %s %s", filename, str(e))
-            if not tables:
-                continue
-            databases[database_name] = Database(database_name, tables)
-        self.databases = databases
-
-    def load_table_schema(self, tasker):
-        schema = {}
-        for name, valuer in tasker.tasker.outputer.schema.items():
-            final_filter = valuer.get_final_filter()
-            if isinstance(final_filter, IntFilter):
-                schema[name] = ColumnType.LONG
-            elif isinstance(final_filter, FloatFilter):
-                schema[name] = ColumnType.DOUBLE
-            elif isinstance(final_filter, StringFilter):
-                schema[name] = ColumnType.VARCHAR
-            elif isinstance(final_filter, BytesFilter):
-                schema[name] = ColumnType.BLOB
-            elif isinstance(final_filter, BooleanFilter):
-                schema[name] = ColumnType.BOOL
-            elif isinstance(final_filter, DateTimeFilter):
-                schema[name] = ColumnType.DATETIME
-            elif isinstance(final_filter, DateFilter):
-                schema[name] = ColumnType.DATE
-            elif isinstance(final_filter, TimeFilter):
-                schema[name] = ColumnType.TIME
-            elif isinstance(final_filter, ObjectIdFilter):
-                schema[name] = ColumnType.VARCHAR
-            elif isinstance(final_filter, UUIDFilter):
-                schema[name] = ColumnType.VARCHAR
-            else:
-                schema[name] = infer_type("") if not final_filter else infer_type(final_filter.filter(None))
-        return schema
-
 
 class Server(MysqlServer):
     def __init__(self):
         super(Server, self).__init__(session_factory=self.create_session, identity_provider=UserIdentityProvider())
 
         self.script_engine = None
+        self.thread_pool_executor = None
+        self.databases = {}
 
     def create_session(self, *args, **kwargs):
         if not self.script_engine:
@@ -502,7 +440,7 @@ class Server(MysqlServer):
         executor = Executor(self.script_engine.manager, self.script_engine.executor.session_config.session(),
                             self.script_engine.executor)
         return ServerSession(ServerSessionExecuterContext(self.script_engine, executor), self.identity_provider,
-                             *args, **kwargs)
+                             self.thread_pool_executor, self.databases, *args, **kwargs)
 
     def setup_script_engine(self):
         if self.script_engine is not None:
@@ -520,10 +458,12 @@ class Server(MysqlServer):
                 exit_code = executor.execute()
                 if exit_code is not None and exit_code != 0:
                     raise ExecuterError(exit_code)
+        self.thread_pool_executor = ThreadPoolExecutor(self.script_engine.config.config.get("executor_max_workers", 5))
+        Database.scan_databases(self.script_engine, self.databases)
 
     async def start_server(self, **kwargs):
-        await super(Server, self).start_server(**kwargs)
         self.setup_script_engine()
+        await super(Server, self).start_server(**kwargs)
 
     def close(self):
         super(Server, self).close()
