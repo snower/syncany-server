@@ -141,6 +141,7 @@ class ServerSession(Session):
         if not isinstance(expression, (sqlglot_expressions.Insert, sqlglot_expressions.Delete,
                                        sqlglot_expressions.Select, sqlglot_expressions.Union)):
             if sql.lower().startswith("flush"):
+                await self.loop.run_in_executor(self.thread_pool_executor, self.identity_provider.load_users)
                 await self.loop.run_in_executor(self.thread_pool_executor, Database.scan_databases,
                                                 self.executer_context.engine, self.databases)
                 return [(database.name, table.name, table.filename) for database in self.databases.values()
@@ -459,6 +460,7 @@ class Server(MysqlServer):
                 if exit_code is not None and exit_code != 0:
                     raise ExecuterError(exit_code)
         self.thread_pool_executor = ThreadPoolExecutor(self.script_engine.config.config.get("executor_max_workers", 5))
+        self.identity_provider.load_users()
         Database.scan_databases(self.script_engine, self.databases)
 
     async def start_server(self, **kwargs):

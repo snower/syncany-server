@@ -3,6 +3,7 @@
 # create by: snower
 
 import os
+from syncany.logger import get_logger
 from mysql_mimic import IdentityProvider, NativePasswordAuthPlugin, User
 from syncany.taskers.config import load_config
 
@@ -15,7 +16,8 @@ class UserIdentityProvider(IdentityProvider):
         return [NativePasswordAuthPlugin()]
 
     async def get_user(self, username):
-        self.load_users()
+        if self.users is None:
+            self.load_users()
 
         user = self.users.get(username)
         if user:
@@ -27,22 +29,28 @@ class UserIdentityProvider(IdentityProvider):
         return None
 
     async def get_databases(self, username):
-        self.load_users()
-
+        if self.users is None:
+            self.load_users()
         user = self.users.get(username)
         return user["databases"] if user and "databases" in user else None
 
     def load_users(self):
-        if self.users is not None:
-            return
-        self.users = {}
+        users = {}
         for filename in ("user.json", "user.yaml"):
             if not os.path.exists(filename):
                 continue
             config = load_config(filename)
-            if not config or "users" not in config or not isinstance(config["users"], list):
+            if not config or not isinstance(config, (dict, list)):
                 continue
-            for user in config["users"]:
-                if "username" not in user or "password" not in user:
+            if isinstance(config, dict):
+                config_users = config["users"] if "users" in config and isinstance(config["users"], list) else None
+            else:
+                config_users = config
+            if not config_users:
+                continue
+            for user in config_users:
+                if not isinstance(user, dict) or "username" not in user or "password" not in user:
                     continue
-                self.users[user["username"]] = user
+                users[user["username"]] = user
+        self.users = users
+        get_logger().info("load users finish, users: %s", ",".join(list(users.keys())))
