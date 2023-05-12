@@ -61,7 +61,7 @@ setup(
             'syncany-server = syncanyserver.main:main',
         ],
     },
-    description='Simple and easy-to-use sql execution engine',
+    description='Simple and easy to use SQL scripts to build virtual database tables MySQL Server',
     long_description=long_description,
     long_description_content_type='text/markdown'
 )

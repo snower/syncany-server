@@ -2,6 +2,7 @@
 # 2023/5/4
 # create by: snower
 
+import sys
 import time
 from collections import defaultdict
 import asyncio
@@ -95,14 +96,17 @@ class ServerSessionExecuterContext(ExecuterContext):
 
 
 class ServerSession(Session):
-    def __init__(self, executer_context, identity_provider, thread_pool_executor, databases, *args, **kwargs):
+    def __init__(self, config_path, executer_context, identity_provider, thread_pool_executor, databases,
+                 executor_wait_timeout, *args, **kwargs):
         super(ServerSession, self).__init__(*args, **kwargs)
 
         self.loop = asyncio.get_event_loop()
+        self.config_path = config_path
         self.executer_context = executer_context
         self.identity_provider = identity_provider
         self.thread_pool_executor = thread_pool_executor
         self.databases = databases
+        self.executor_wait_timeout = executor_wait_timeout
         self.execute_index = 0
 
     async def handle_query(self, sql, attrs):
@@ -143,7 +147,7 @@ class ServerSession(Session):
             if sql.lower().startswith("flush"):
                 await self.loop.run_in_executor(self.thread_pool_executor, self.identity_provider.load_users)
                 await self.loop.run_in_executor(self.thread_pool_executor, Database.scan_databases,
-                                                self.executer_context.engine, self.databases)
+                                                self.config_path, self.executer_context.engine, self.databases)
                 return [(database.name, table.name, table.filename) for database in self.databases.values()
                         for table in database.tables], ["database", "table", "filename"]
             return [], []
@@ -159,10 +163,7 @@ class ServerSession(Session):
                               (time.time() - start_time) * 1000)
 
     def execute_query(self, expression, start_time):
-        executor_wait_timeout = self.variables.values.get("wait_timeout")
-        if not executor_wait_timeout:
-            session_config = self.executer_context.executor.session_config.get()
-            executor_wait_timeout = session_config.get("executor_wait_timeout") or 120
+        executor_wait_timeout = self.variables.values.get("wait_timeout") or self.executor_wait_timeout
         if start_time + int(executor_wait_timeout) <= time.time():
             raise TimeoutError("query execute wait timeout")
 
@@ -428,9 +429,14 @@ class ServerSession(Session):
 
 
 class Server(MysqlServer):
-    def __init__(self):
+    def __init__(self, host=None, port=3306, config_path=".", executor_max_workers=5, executor_wait_timeout=120):
         super(Server, self).__init__(session_factory=self.create_session, identity_provider=UserIdentityProvider())
 
+        self.host = host
+        self.port = port
+        self.config_path = config_path
+        self.executor_max_workers = executor_max_workers
+        self.executor_wait_timeout = executor_wait_timeout
         self.script_engine = None
         self.thread_pool_executor = None
         self.databases = {}
@@ -440,8 +446,9 @@ class Server(MysqlServer):
             return None
         executor = Executor(self.script_engine.manager, self.script_engine.executor.session_config.session(),
                             self.script_engine.executor)
-        return ServerSession(ServerSessionExecuterContext(self.script_engine, executor), self.identity_provider,
-                             self.thread_pool_executor, self.databases, *args, **kwargs)
+        return ServerSession(self.config_path, ServerSessionExecuterContext(self.script_engine, executor),
+                             self.identity_provider, self.thread_pool_executor, self.databases,
+                             self.executor_wait_timeout, *args, **kwargs)
 
     def setup_script_engine(self):
         if self.script_engine is not None:
@@ -459,13 +466,15 @@ class Server(MysqlServer):
                 exit_code = executor.execute()
                 if exit_code is not None and exit_code != 0:
                     raise ExecuterError(exit_code)
-        self.thread_pool_executor = ThreadPoolExecutor(self.script_engine.config.config.get("executor_max_workers", 5))
+        self.thread_pool_executor = ThreadPoolExecutor(self.executor_max_workers)
         self.identity_provider.load_users()
-        Database.scan_databases(self.script_engine, self.databases)
+        Database.scan_databases(self.config_path, self.script_engine, self.databases)
 
     async def start_server(self, **kwargs):
         self.setup_script_engine()
-        await super(Server, self).start_server(**kwargs)
+        await super(Server, self).start_server(host=self.host, port=self.port,
+                                               reuse_port=True if sys.platform != "win32" else None,
+                                               backlog=512, **kwargs)
 
     def close(self):
         super(Server, self).close()

@@ -9,7 +9,8 @@ from syncany.taskers.config import load_config
 
 
 class UserIdentityProvider(IdentityProvider):
-    def __init__(self):
+    def __init__(self, config_path="."):
+        self.config_path = config_path
         self.users = None
 
     def get_plugins(self):
@@ -36,7 +37,7 @@ class UserIdentityProvider(IdentityProvider):
 
     def load_users(self):
         users = {}
-        for filename in ("user.json", "user.yaml"):
+        for filename in (os.path.join(self.config_path, "user.json"), os.path.join(self.config_path, "user.yaml")):
             if not os.path.exists(filename):
                 continue
             config = load_config(filename)

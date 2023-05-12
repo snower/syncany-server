@@ -49,14 +49,15 @@ class Database(object):
         return None
 
     @classmethod
-    def scan_databases(cls, script_engine, databases):
+    def scan_databases(cls, config_path, script_engine, databases):
         new_databases = {}
-        basepath = os.getcwd()
-        for dirname in ([basepath] + list(os.listdir(basepath))):
-            dirpath = basepath if dirname == basepath else os.path.join(basepath, dirname)
-            if not os.path.isdir(dirpath) or (dirname != basepath and not dirname.isidentifier()):
+        for dirname in ([config_path] + list(os.listdir(config_path))):
+            dirpath = config_path if dirname == config_path else os.path.join(config_path, dirname)
+            if not os.path.isdir(dirpath):
                 continue
-            database_name = "cwd" if dirname == basepath else dirname
+            database_name = os.path.basename(config_path) if dirname == config_path else dirname
+            if not database_name.isidentifier():
+                database_name = "".join([c if c.isidentifier() else "_" for c in database_name])
 
             tables = []
             for filename in os.listdir(dirpath):
