@@ -37,7 +37,7 @@ setup(
     zip_safe=False,
     install_requires=[
         "pyyaml>=5.1.2",
-        "sqlglot>=10.6.2",
+        "sqlglot>=10.6.2,<12",
         "syncanysql>=0.1.4",
         "mysql-mimic>=2.2.3"
     ],
