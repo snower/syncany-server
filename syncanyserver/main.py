@@ -31,6 +31,8 @@ def main():
                         help='The maximum waiting seconds time before the SQL query task is submitted to '
                              'the ThreadPoolExecutor for execution (default: 120 seconds)')
     args = parser.parse_args()
+    if args.config_path:
+        os.chdir(os.path.abspath(args.config_path))
     asyncio.run(Server(args.bind, args.port, os.path.abspath(args.config_path),
                        args.executor_max_workers, args.executor_wait_timeout)
                 .serve_forever())
