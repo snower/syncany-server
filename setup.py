@@ -6,7 +6,7 @@ import sys
 import os
 from setuptools import find_packages, setup
 
-version = "0.0.1"
+version = "0.0.2"
 
 if os.path.exists("README.md"):
     if sys.version_info[0] >= 3:
@@ -38,7 +38,7 @@ setup(
     install_requires=[
         "pyyaml>=5.1.2",
         "sqlglot>=10.6.2",
-        "syncanysql>=0.1.3",
+        "syncanysql>=0.1.4",
         "mysql-mimic>=2.2.3"
     ],
     extras_require={
