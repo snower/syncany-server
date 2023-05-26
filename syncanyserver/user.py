@@ -9,8 +9,10 @@ from syncany.taskers.config import load_config
 
 
 class UserIdentityProvider(IdentityProvider):
-    def __init__(self, config_path="."):
+    def __init__(self, config_path=".", username=None, password=None):
         self.config_path = config_path
+        self.username = username
+        self.password = password
         self.users = None
 
     def get_plugins(self):
@@ -53,5 +55,7 @@ class UserIdentityProvider(IdentityProvider):
                 if not isinstance(user, dict) or "username" not in user or "password" not in user:
                     continue
                 users[user["username"]] = user
+        if not users and self.username:
+            users[self.username] = {"username": self.username, "password": self.password}
         self.users = users
         get_logger().info("load users finish, users: %s", ",".join(list(users.keys())))

@@ -24,6 +24,12 @@ def main():
     parser.add_argument('-c', "--config_path", dest='config_path', default=".", type=check_path,
                         help='The directory where the configuration file is located, '
                              'the default current directory (default: .)')
+    parser.add_argument('-U', "--username", dest='username', default="root", type=str,
+                        help='Login account name, invalid when configured with user.json'
+                             ' configuration file (default: root)')
+    parser.add_argument('-P', "--password", dest='password', default="", type=str,
+                        help='Login account password, invalid when configured with user.json'
+                             ' configuration file (default: )')
     parser.add_argument('-w', "--executor_max_workers", dest='executor_max_workers', default=5, type=int,
                         help='Maximum number of worker threads for ThreadPoolExecutor executing SQL '
                              'queries (default: 5)')
@@ -34,6 +40,7 @@ def main():
     if args.config_path:
         os.chdir(os.path.abspath(args.config_path))
     asyncio.run(Server(args.bind, args.port, os.path.abspath(args.config_path),
+                       args.username, args.password,
                        args.executor_max_workers, args.executor_wait_timeout)
                 .serve_forever())
 

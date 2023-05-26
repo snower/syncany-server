@@ -429,8 +429,10 @@ class ServerSession(Session):
 
 
 class Server(MysqlServer):
-    def __init__(self, host=None, port=3306, config_path=".", executor_max_workers=5, executor_wait_timeout=120):
-        super(Server, self).__init__(session_factory=self.create_session, identity_provider=UserIdentityProvider())
+    def __init__(self, host=None, port=3306, config_path=".", username=None, password=None,
+                 executor_max_workers=5, executor_wait_timeout=120):
+        super(Server, self).__init__(session_factory=self.create_session,
+                                     identity_provider=UserIdentityProvider(config_path, username, password))
 
         self.host = host
         self.port = port
