@@ -215,6 +215,15 @@ class ServerSession(Session):
         if start_time + int(executor_wait_timeout) <= time.time():
             raise TimeoutError("query execute wait timeout")
 
+        if expression.args.get("into"):
+            with self.executer_context as executer_context:
+                executer_context.session = self
+                try:
+                    executer_context.execute_expression(expression)
+                finally:
+                    executer_context.session = None
+            return [], []
+
         with self.executer_context.context(self) as executer_context:
             primary_tables = self.parse_primary_tables(expression, defaultdict(list))
             if primary_tables:
