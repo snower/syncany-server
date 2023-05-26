@@ -9,6 +9,8 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from sqlglot import expressions as sqlglot_expressions
 from mysql_mimic import Session, MysqlServer
+from mysql_mimic.errors import MysqlError, ErrorCode
+from mysql_mimic.intercept import expression_to_value
 from syncany.logger import get_logger
 from syncany.taskers.manager import TaskerManager
 from syncany.database.memory import MemoryDBCollection
@@ -140,6 +142,52 @@ class ServerSession(Session):
                                 'Update_time', 'Check_time', 'Collation', 'Checksum', 'Create_options', 'Comment')
                 return [], []
         return await super(ServerSession, self).handle_query(sql, attrs)
+
+    def _set_variable(self, setitem):
+        assignment = setitem.this
+        left = assignment.left
+
+        if isinstance(left, sqlglot_expressions.SessionParameter):
+            scope = left.text("kind") or "SESSION"
+            name = left.name
+        elif isinstance(left, sqlglot_expressions.Parameter):
+            scope = left.text("kind") or "GLOBAL"
+            name = left.name
+        else:
+            scope = setitem.text("kind") or "SESSION"
+            name = left.name
+
+        scope = scope.upper()
+        value = expression_to_value(assignment.right)
+
+        if scope in {"SESSION", "LOCAL"}:
+            self.variables.set(name, value)
+        if self.executer_context:
+            with self.executer_context as executer_context:
+                try:
+                    with executer_context.executor as executor:
+                        executor.run("session[%d-%d]" % (id(self), self.execute_index),
+                                     [SqlSegment("set " + str(setitem), 1)])
+                        exit_code = executor.execute()
+                        if exit_code is not None and exit_code != 0:
+                            raise ExecuterError(exit_code)
+                except Exception as e:
+                    raise MysqlError(str(e), code=ErrorCode.NOT_SUPPORTED_YET)
+        else:
+            raise MysqlError(
+                f"Cannot SET variable {name} with scope {scope}",
+                code=ErrorCode.NOT_SUPPORTED_YET,
+            )
+
+    async def _static_query_interceptor(self, expression):
+        try:
+            if isinstance(expression, sqlglot_expressions.Select) and \
+                    not any(expression.args.get(a)
+                            for a in set(sqlglot_expressions.Select.arg_types) - {"expressions", "limit", "hint"}):
+                return await self.query(expression, str(expression), {})
+            return None
+        except Exception:
+            return super(ServerSession, self)._static_query_interceptor(expression)
 
     async def query(self, expression, sql, attrs):
         if not isinstance(expression, (sqlglot_expressions.Insert, sqlglot_expressions.Delete,
