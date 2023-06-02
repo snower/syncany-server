@@ -16,7 +16,7 @@ from syncany.taskers.manager import TaskerManager
 from syncany.database.memory import MemoryDBCollection
 from syncanysql.compiler import Compiler
 from syncanysql.taskers.query import QueryTasker
-from syncanysql import ScriptEngine, Executor, ExecuterContext, SqlSegment, SqlParser, ExecuterError
+from syncanysql import ScriptEngine, Executor, ExecuterContext, SqlSegment, SqlParser
 from syncanysql.parser import FileParser
 from .user import UserIdentityProvider
 from .database import DatabaseManager, Database
@@ -46,28 +46,19 @@ class ServerSessionExecuterContext(ExecuterContext):
             sqls = [sql] if not isinstance(sql, list) else sql
         with self.executor as executor:
             executor.run("session[%d-%d]" % (id(self.session), self.session.execute_index), sqls)
-            exit_code = executor.execute()
-            if exit_code is not None and exit_code != 0:
-                raise ExecuterError(exit_code)
-        return 0
+            executor.execute()
 
     def execute_segments(self, sql_segments):
         with self.executor as executor:
             executor.run("session[%d-%d]" % (id(self.session), self.session.execute_index), sql_segments)
-            exit_code = executor.execute()
-            if exit_code is not None and exit_code != 0:
-                raise ExecuterError(exit_code)
-        return 0
+            executor.execute()
 
     def execute_file(self, filename):
         sql_parser = FileParser(filename)
         sqls = sql_parser.load()
         with self.executor as executor:
             executor.run("session[%s-%d]%s" % (id(self.session), self.session.execute_index, filename), sqls)
-            exit_code = executor.execute()
-            if exit_code is not None and exit_code != 0:
-                raise ExecuterError(exit_code)
-        return 0
+            executor.execute()
 
     def execute_expression(self, expression, output_name=None):
         with self.executor as executor:
@@ -91,10 +82,7 @@ class ServerSessionExecuterContext(ExecuterContext):
                 tasker.config["output"] = "&." + output_name + "::" + tasker.config["output"].split("::")[-1]
             executor.runners.extend(tasker.start(config["name"], executor, executor.session_config, executor.manager,
                                                  arguments))
-            exit_code = executor.execute()
-            if exit_code is not None and exit_code != 0:
-                raise ExecuterError(exit_code)
-        return 0
+            executor.execute()
 
 
 class ServerSession(Session):
@@ -168,9 +156,7 @@ class ServerSession(Session):
                     with executer_context.executor as executor:
                         executor.run("session[%d-%d]" % (id(self), self.execute_index),
                                      [SqlSegment("set " + str(setitem), 1)])
-                        exit_code = executor.execute()
-                        if exit_code is not None and exit_code != 0:
-                            raise ExecuterError(exit_code)
+                        executor.execute()
                 except Exception as e:
                     raise MysqlError(str(e), code=ErrorCode.NOT_SUPPORTED_YET)
         else:
@@ -276,16 +262,12 @@ class ServerSession(Session):
                 if table_variable_sqls:
                     executor.run("session[%d-%d]" % (id(self), self.execute_index),
                                  [SqlSegment(table_variable_sqls[i], i + 1) for i in range(len(table_variable_sqls))])
-                    exit_code = executor.execute()
-                    if exit_code is not None and exit_code != 0:
-                        raise ExecuterError(exit_code)
+                    executor.execute()
 
                 sql_parser = FileParser(table.filename)
                 sqls = sql_parser.load()
                 executor.run("session[%s-%d]%s" % (id(self), self.execute_index, table.filename), sqls)
-                exit_code = executor.execute()
-                if exit_code is not None and exit_code != 0:
-                    raise ExecuterError(exit_code)
+                executor.execute()
 
             for table_expression in table_expressions:
                 table_expression.args["db"] = None
@@ -522,9 +504,7 @@ class Server(MysqlServer):
             self.script_engine.executor.run("init", [SqlSegment("execute `%s`" % init_execute_files[i], i + 1)
                                                      for i in range(len(init_execute_files))])
             with self.script_engine.executor as executor:
-                exit_code = executor.execute()
-                if exit_code is not None and exit_code != 0:
-                    raise ExecuterError(exit_code)
+                executor.execute()
         self.thread_pool_executor = ThreadPoolExecutor(self.executor_max_workers)
         self.identity_provider.load_users()
         Database.scan_databases(self.config_path, self.script_engine, self.databases)
