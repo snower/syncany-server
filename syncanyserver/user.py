@@ -37,6 +37,18 @@ class UserIdentityProvider(IdentityProvider):
         user = self.users.get(username)
         return user["databases"] if user and "databases" in user else None
 
+    def is_readonly(self, username):
+        if self.users is None:
+            self.load_users()
+        user = self.users.get(username)
+        return user["readonly"] if user and "readonly" in user else True
+
+    def has_permission(self, username, permission):
+        if self.users is None:
+            self.load_users()
+        user = self.users.get(username)
+        return (permission in user["permissions"]) if user and "permissions" in user else False
+
     def load_users(self):
         users = {}
         for filename in (os.path.join(self.config_path, "user.json"), os.path.join(self.config_path, "user.yaml")):

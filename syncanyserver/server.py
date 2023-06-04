@@ -3,6 +3,7 @@
 # create by: snower
 
 import sys
+import os
 import time
 from collections import defaultdict
 import asyncio
@@ -191,7 +192,10 @@ class ServerSession(Session):
         try:
             self.execute_index += 1
             get_logger().info("session[%d-%d] query SQL: %s", id(self), self.execute_index, sql.replace("\n", " "))
-            return await self.loop.run_in_executor(self.thread_pool_executor, self.execute_query, expression, start_time)
+            result = await self.loop.run_in_executor(self.thread_pool_executor, self.execute_query, expression, start_time)
+            if isinstance(result, Exception):
+                raise result
+            return result
         finally:
             get_logger().info("session[%d-%d] query SQL finish %.2fms", id(self), self.execute_index,
                               (time.time() - start_time) * 1000)
@@ -220,11 +224,19 @@ class ServerSession(Session):
 
             if isinstance(expression, sqlglot_expressions.Insert):
                 database_name, table_name = self.parse_insert_table(expression)
+                if self.identity_provider.is_readonly(self.username):
+                    if not self.identity_provider.has_permission(self.username, "temporary_memory_table"):
+                        raise MysqlError("no temporary_memory_table permission", code=ErrorCode.ACCESS_DENIED_ERROR)
+                    if database_name and database_name not in ("-", "--"):
+                        raise MysqlError("readonly", code=ErrorCode.ACCESS_DENIED_ERROR)
+                    if not table_name or table_name in (".txt", ".csv", ".json") or table_name.lower().startswith("file://") \
+                            or os.path.splitext(os.path.split(table_name)[-1])[-1] in (".txt", ".json", ".csv", ".xls", ".xlsx"):
+                        raise MysqlError("readonly", code=ErrorCode.ACCESS_DENIED_ERROR)
                 executer_context.execute_expression(expression)
                 if (database_name is None or database_name in self.databases) and table_name:
                     datas = executer_context.pop_memory_datas(table_name)
                     if datas:
-                        self.executer_context.memory_database[table_name] = datas
+                        self.executer_context.memory_database_collection[table_name] = datas
                 return [], []
             if isinstance(expression, sqlglot_expressions.Delete):
                 executer_context.execute_expression(expression)
@@ -313,9 +325,11 @@ class ServerSession(Session):
     def parse_insert_table(self, expression):
         if not isinstance(expression, sqlglot_expressions.Insert):
             return None, None
+        if isinstance(expression.args["this"], sqlglot_expressions.Schema):
+            expression = expression.args["this"]
         if isinstance(expression.args["this"], sqlglot_expressions.Table):
             table_expression = expression.args["this"]
-            return ((table_expression.args["db"].name if "db" in table_expression.args else None),
+            return ((table_expression.args["db"].name if table_expression.args.get("db") else None),
                     table_expression.args["this"].name)
         return None, None
 
