@@ -17,6 +17,8 @@ class Table(object):
     def parse_schema(cls, tasker):
         schema = {}
         for name, valuer in tasker.tasker.outputer.schema.items():
+            if name == "_aggregate_key_":
+                continue
             final_filter = valuer.get_final_filter()
             if isinstance(final_filter, IntFilter):
                 schema[name] = ColumnType.LONG

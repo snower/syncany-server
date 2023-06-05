@@ -81,6 +81,9 @@ class Database(object):
                         if ("&.--." + table_name) in tasker.config["output"]:
                             table_name = tasker.config["output"].split("&.--.")[-1].split("::")[0]
                             tables.append(Table(table_name, filename, Table.parse_schema(tasker)))
+                        elif tasker.reduce_config and ("&.--." + table_name) in tasker.reduce_config["output"]:
+                            table_name = tasker.reduce_config["output"].split("&.--.")[-1].split("::")[0]
+                            tables.append(Table(table_name, filename, Table.parse_schema(tasker)))
                         tasker.tasker.close()
                 except Exception as e:
                     get_logger().warning("load database file error %s %s", filename, str(e))
