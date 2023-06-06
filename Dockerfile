@@ -4,7 +4,8 @@ WORKDIR /config
 
 RUN apt-get update && apt-get install -y ca-certificates git
 
-COPY requirements.txt /root
+COPY requirements.txt /root/
+COPY examples/mall/ /config/
 
 RUN cd /root && \
     sed -i '/Items below this point will not be included in the Docker Image/,$d' requirements.txt && \
