@@ -5,6 +5,7 @@
 import os
 import argparse
 import asyncio
+import sys
 from .server import Server
 
 
@@ -16,6 +17,8 @@ def check_path(value):
 
 
 def main():
+    if os.getcwd() not in sys.path:
+        sys.path.insert(0, os.getcwd())
     parser = argparse.ArgumentParser(
         description="Simple and easy to use SQL scripts to build virtual database tables MySQL Server"
     )
@@ -39,6 +42,8 @@ def main():
     args = parser.parse_args()
     if args.config_path:
         os.chdir(os.path.abspath(args.config_path))
+        if args.config_path not in sys.path:
+            sys.path.insert(0, args.config_path)
     asyncio.run(Server(args.bind, args.port, os.path.abspath(args.config_path),
                        args.username, args.password,
                        args.executor_max_workers, args.executor_wait_timeout)
