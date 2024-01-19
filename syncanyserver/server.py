@@ -9,6 +9,8 @@ from collections import defaultdict
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from sqlglot import expressions as sqlglot_expressions
+from sqlglot import dialects as sqlglot_dialects
+from sqlglot import parser as sqlglot_parser
 from mysql_mimic import Session, MysqlServer
 from mysql_mimic.errors import MysqlError, ErrorCode
 from mysql_mimic.intercept import expression_to_value
@@ -85,8 +87,43 @@ class ServerSessionExecuterContext(ExecuterContext):
                                                  arguments))
             executor.execute()
 
+class MySQL(sqlglot_dialects.MySQL):
+    class Parser(sqlglot_dialects.MySQL.Parser):
+        def _parse_limit(self, this=None, top=False):
+            if top or not self._match(sqlglot_parser.TokenType.LIMIT, False):
+                return sqlglot_parser.Parser._parse_limit(self, this, top)
+            offset_token = sqlglot_parser.seq_get(self._tokens, self._index + 1)
+            if offset_token is None or offset_token.token_type != sqlglot_parser.TokenType.NUMBER:
+                return sqlglot_parser.Parser._parse_limit(self, this, top)
+            comma_token = sqlglot_parser.seq_get(self._tokens, self._index + 2)
+            if comma_token is None or comma_token.token_type != sqlglot_parser.TokenType.COMMA:
+                return sqlglot_parser.Parser._parse_limit(self, this, top)
+            limit_token = sqlglot_parser.seq_get(self._tokens, self._index + 3)
+            if limit_token is None or limit_token.token_type != sqlglot_parser.TokenType.NUMBER:
+                return sqlglot_parser.Parser._parse_limit(self, this, top)
+            return self.expression(sqlglot_parser.exp.Limit, this=this,
+                                   expression=self.PRIMARY_PARSERS[sqlglot_parser.TokenType.NUMBER](self, limit_token))
+
+        def _parse_offset(self, this=None):
+            if not self._match(sqlglot_parser.TokenType.LIMIT, False):
+                return sqlglot_parser.Parser._parse_offset(self, this)
+            offset_token = sqlglot_parser.seq_get(self._tokens, self._index + 1)
+            if offset_token is None or offset_token.token_type != sqlglot_parser.TokenType.NUMBER:
+                return sqlglot_parser.Parser._parse_offset(self, this)
+            comma_token = sqlglot_parser.seq_get(self._tokens, self._index + 2)
+            if comma_token is None or comma_token.token_type != sqlglot_parser.TokenType.COMMA:
+                return sqlglot_parser.Parser._parse_offset(self, this)
+            limit_token = sqlglot_parser.seq_get(self._tokens, self._index + 3)
+            if limit_token is None or limit_token.token_type != sqlglot_parser.TokenType.NUMBER:
+                return sqlglot_parser.Parser._parse_offset(self, this)
+            self._advance(4)
+            return self.expression(sqlglot_parser.exp.Offset, this=this,
+                                   expression=self.PRIMARY_PARSERS[sqlglot_parser.TokenType.NUMBER](self, offset_token))
+
 
 class ServerSession(Session):
+    dialect = MySQL
+
     def __init__(self, config_path, executer_context, identity_provider, thread_pool_executor, databases,
                  executor_wait_timeout, *args, **kwargs):
         super(ServerSession, self).__init__(*args, **kwargs)
