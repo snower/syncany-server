@@ -21,25 +21,25 @@ class Table(object):
                 continue
             final_filter = valuer.get_final_filter()
             if isinstance(final_filter, IntFilter):
-                schema[name] = ColumnType.LONG
+                schema[name] = (ColumnType.LONG, "int")
             elif isinstance(final_filter, FloatFilter):
-                schema[name] = ColumnType.DOUBLE
+                schema[name] = (ColumnType.DOUBLE, "float")
             elif isinstance(final_filter, StringFilter):
-                schema[name] = ColumnType.VARCHAR
+                schema[name] = (ColumnType.VARCHAR, "str")
             elif isinstance(final_filter, BytesFilter):
-                schema[name] = ColumnType.BLOB
+                schema[name] = (ColumnType.BLOB, "bytes")
             elif isinstance(final_filter, BooleanFilter):
-                schema[name] = ColumnType.BOOL
+                schema[name] = (ColumnType.BOOL, "bool")
             elif isinstance(final_filter, DateTimeFilter):
-                schema[name] = ColumnType.DATETIME
+                schema[name] = (ColumnType.DATETIME, "datetime")
             elif isinstance(final_filter, DateFilter):
-                schema[name] = ColumnType.DATE
+                schema[name] = (ColumnType.DATE, "date")
             elif isinstance(final_filter, TimeFilter):
-                schema[name] = ColumnType.TIME
+                schema[name] = (ColumnType.TIME, "time")
             elif isinstance(final_filter, ObjectIdFilter):
-                schema[name] = ColumnType.VARCHAR
+                schema[name] = (ColumnType.VARCHAR, "objectid")
             elif isinstance(final_filter, UUIDFilter):
-                schema[name] = ColumnType.VARCHAR
+                schema[name] = (ColumnType.VARCHAR, "uuid")
             else:
-                schema[name] = infer_type("") if not final_filter else infer_type(final_filter.filter(None))
+                schema[name] = (infer_type("") if not final_filter else infer_type(final_filter.filter(None)), None)
         return schema

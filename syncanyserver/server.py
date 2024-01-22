@@ -1,13 +1,17 @@
 # -*- coding: utf-8 -*-
 # 2023/5/4
 # create by: snower
-
+import decimal
+import json
 import sys
 import os
 import time
+import datetime
 from collections import defaultdict
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+
+from mysql_mimic.types import ColumnType
 from sqlglot import expressions as sqlglot_expressions
 from sqlglot import dialects as sqlglot_dialects
 from sqlglot import parser as sqlglot_parser
@@ -203,6 +207,28 @@ class ServerSession(Session):
                 code=ErrorCode.NOT_SUPPORTED_YET,
             )
 
+    async def _show_interceptor(self, expression):
+        if isinstance(expression, sqlglot_expressions.Show):
+            kind = expression.name.upper()
+            if kind != 'CREATE TABLE':
+                return await super(ServerSession, self)._show_interceptor(expression)
+            db_name = expression.args.get("db").name
+            if db_name not in self.databases:
+                return None
+            table_name = expression.args.get("target").name
+            table_schema = self.databases[db_name].get_table_schema(table_name)
+            if not table_schema:
+                return None
+            column_sql = []
+            for column_name, column_type in table_schema.items():
+                if column_type[0] in (ColumnType.VARCHAR,):
+                    column_sql.append("`%s` %s(4096)" % (column_name, column_type[0].name))
+                else:
+                    column_sql.append("`%s` %s" % (column_name, column_type[0].name))
+            return [(table_name, "CREATE TABLE `%s` (\n%s\n) DEFAULT CHARSET=utf8mb4" %
+                     (table_name, ",\n".join(column_sql)))], ("Table", "Create Table")
+        return await super(ServerSession, self)._show_interceptor(expression)
+
     async def _static_query_interceptor(self, expression):
         try:
             if isinstance(expression, sqlglot_expressions.Select) and \
@@ -285,11 +311,23 @@ class ServerSession(Session):
             if not datas:
                 return [], []
             keys = list(datas[0].keys())
-            return [tuple(data[key] for key in keys) for data in datas], keys
+
+            def format_value(value):
+                if value is None:
+                    return value
+                if isinstance(value, datetime.datetime):
+                    return datetime.datetime(value.year, value.month, value.day, value.hour, value.minute, value.second)
+                if isinstance(value, (bool, int, float, str, bytes, datetime.date, datetime.time, decimal.Decimal)):
+                    return value
+                if isinstance(value, (set, map, list, tuple)):
+                    return json.dumps(value, default=str, ensure_ascii=False)
+                return str(value)
+            return [tuple(format_value(data[key]) for key in keys) for data in datas], keys
 
     async def schema(self):
         user_databases = await self.identity_provider.get_databases(self.username)
-        return {name: {table.name: table.schema for table in database.tables if table.schema}
+        return {name: {table.name: {column_name: column_type[0] for column_name, column_type in table.schema.items()}
+                       for table in database.tables if table.schema}
                 for name, database in self.databases.items()
                 if not user_databases or name in user_databases}
 
@@ -519,6 +557,9 @@ class ServerSession(Session):
 
 
 class Server(MysqlServer):
+    origin_parse_table = Compiler.parse_table
+    origin_parse_column = Compiler.parse_column
+
     def __init__(self, host=None, port=3306, config_path=".", username=None, password=None,
                  executor_max_workers=5, executor_wait_timeout=120):
         super(Server, self).__init__(session_factory=self.create_session,
@@ -562,6 +603,42 @@ class Server(MysqlServer):
 
     async def start_server(self, **kwargs):
         self.setup_script_engine()
+
+        def parse_table(compiler, *args):
+            table_info = Server.origin_parse_table(compiler, *args)
+            if not isinstance(table_info, dict):
+                return table_info
+            if not hasattr(compiler, "server_schemas"):
+                setattr(compiler, "server_schemas", {})
+            compiler.server_schemas[table_info["table_name"]] = table_info
+            return table_info
+
+        def parse_column(compiler, *args):
+            column_info = Server.origin_parse_column(compiler, *args)
+            if not isinstance(column_info, dict):
+                return column_info
+            if column_info.get("typing_filters"):
+                return column_info
+            if hasattr(compiler, "server_schemas") and column_info["table_name"] in compiler.server_schemas:
+                table_info = compiler.server_schemas[column_info["table_name"]]
+                db_name, table_name = table_info["db"], table_info["name"]
+            else:
+                table_info = column_info["table_name"].split(".")
+                if len(table_info) <= 1:
+                    return column_info
+                db_name, table_name = table_info[0], table_info[1]
+            if db_name not in self.databases:
+                return column_info
+            table_schema = self.databases[db_name].get_table_schema(table_name)
+            if table_schema is None:
+                return column_info
+            if column_info["column_name"] not in table_schema:
+                return column_info
+            column_info["typing_filters"] = [table_schema[column_info["column_name"]][1]]
+            return column_info
+
+        Compiler.parse_table = parse_table
+        Compiler.parse_column = parse_column
         await super(Server, self).start_server(host=self.host, port=self.port,
                                                reuse_port=True if sys.platform != "win32" else None,
                                                backlog=512, **kwargs)

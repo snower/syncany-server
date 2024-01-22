@@ -3,8 +3,11 @@
 # create by: snower
 
 import os
+from mysql_mimic.results import ColumnType
 from syncany.logger import get_logger
 from syncany.database.database import DatabaseManager as BaseDatabaseManager, DatabaseDriver
+from syncany.taskers.config import load_config
+from syncanysql.compiler import Compiler
 from syncanysql.executor import Executor
 from syncanysql.parser import FileParser
 from syncanysql.taskers.query import QueryTasker
@@ -38,14 +41,31 @@ class DatabaseManager(BaseDatabaseManager):
 
 
 class Database(object):
+    COLUMN_TYPES = {"int": ColumnType.LONG, "float": ColumnType.FLOAT, "str": ColumnType.VARCHAR, "bytes": ColumnType.BLOB,
+                    'bool': ColumnType.BOOL, 'array': ColumnType.JSON, 'set': ColumnType.JSON, 'map': ColumnType.JSON,
+                    "objectid": ColumnType.VARCHAR, "uuid": ColumnType.VARCHAR,
+                    "datetime": ColumnType.DATETIME, "date": ColumnType.DATE, "time": ColumnType.TIME,
+                    "char": ColumnType.VARCHAR, "varchar": ColumnType.VARCHAR, "nchar": ColumnType.VARCHAR,
+                    "text": ColumnType.VARCHAR, "mediumtext": ColumnType.VARCHAR, "tinytext": ColumnType.VARCHAR,
+                    "bigint": ColumnType.LONG, "mediumint": ColumnType.LONG, "smallint": ColumnType.LONG,
+                    "tinyint": ColumnType.LONG, "decimal": ColumnType.DECIMAL,
+                    "double": ColumnType.DOUBLE, "boolean": ColumnType.BOOL, "binary": ColumnType.BLOB,
+                    "varbinary": ColumnType.BLOB, "blob": ColumnType.BLOB, "timestamp": ColumnType.TIMESTAMP}
+
     def __init__(self, name, tables):
         self.name = name
         self.tables = tables
 
     def get_table(self, table_name):
         for table in self.tables:
-            if table.name == table_name:
+            if table.name == table_name and table.filename is not None:
                 return table
+        return None
+
+    def get_table_schema(self, table_name):
+        for table in self.tables:
+            if table.name == table_name:
+                return table.schema
         return None
 
     @classmethod
@@ -59,14 +79,18 @@ class Database(object):
             if not database_name.isidentifier():
                 database_name = "".join([c if c.isidentifier() else "_" for c in database_name])
 
-            tables = []
+            sql_filenames, meta_filenames = [], []
             for filename in os.listdir(dirpath):
                 if not os.path.isfile(os.path.join(dirpath, filename)):
                     continue
                 table_name, fileext = os.path.splitext(filename)
-                if fileext not in (".sql", ".sqlx"):
-                    continue
-                filename = os.path.join(dirpath, filename)
+                if fileext in (".sql", ".sqlx"):
+                    sql_filenames.append((table_name, os.path.join(dirpath, filename)))
+                elif fileext in (".json", ".yaml") and table_name.endswith(".meta"):
+                    meta_filenames.append((table_name[:-5], os.path.join(dirpath, filename)))
+
+            tables = []
+            for table_name, filename in sql_filenames:
                 try:
                     sql_parser = FileParser(filename)
                     sqls = sql_parser.load()
@@ -87,6 +111,27 @@ class Database(object):
                         tasker.tasker.close()
                 except Exception as e:
                     get_logger().warning("load database file error %s %s", filename, str(e))
+
+            for table_name, filename in meta_filenames:
+                try:
+                    table_meta = load_config(filename)
+                    if not isinstance(table_meta, dict) or "schema" not in table_meta or not isinstance(table_meta["schema"], dict):
+                        continue
+                    try:
+                        table = [t for t in tables if t.name == table_name][0]
+                        table.schema.clear()
+                    except:
+                        table = Table(table_name, None, {})
+                        tables.append(table)
+                    for column_name, column_type in table_meta["schema"].items():
+                        if not column_type or not isinstance(column_type, str):
+                            continue
+                        column_type = column_type.lower()
+                        if column_type not in cls.COLUMN_TYPES:
+                            continue
+                        table.schema[column_name] = (cls.COLUMN_TYPES[column_type], Compiler.TYPE_FILTERS.get(column_type))
+                except Exception as e:
+                    get_logger().warning("load meta file error %s %s", filename, str(e))
             if not tables:
                 continue
             new_databases[database_name] = Database(database_name, tables)
