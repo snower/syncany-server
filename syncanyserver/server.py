@@ -617,7 +617,7 @@ class Server(MysqlServer):
             column_info = Server.origin_parse_column(compiler, *args)
             if not isinstance(column_info, dict):
                 return column_info
-            if column_info.get("typing_filters"):
+            if column_info.get("typing_filters") or not column_info.get("table_name"):
                 return column_info
             if hasattr(compiler, "server_schemas") and column_info["table_name"] in compiler.server_schemas:
                 table_info = compiler.server_schemas[column_info["table_name"]]
