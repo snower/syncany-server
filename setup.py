@@ -39,7 +39,7 @@ setup(
         "pyyaml>=5.1.2",
         "sqlglot>=11.5.5,<12",
         "syncanysql>=0.1.14",
-        "mysql-mimic>=2.2.3"
+        "mysql-mimic>=2.2.3,<2.3"
     ],
     extras_require={
         "pymongo": ['pymongo>=3.6.1'],
