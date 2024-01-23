@@ -7,6 +7,7 @@ from mysql_mimic.results import ColumnType
 from syncany.logger import get_logger
 from syncany.database.database import DatabaseManager as BaseDatabaseManager, DatabaseDriver
 from syncany.taskers.config import load_config
+from syncany.filters import find_filter
 from syncanysql.compiler import Compiler
 from syncanysql.executor import Executor
 from syncanysql.parser import FileParser
@@ -127,9 +128,17 @@ class Database(object):
                         if not column_type or not isinstance(column_type, str):
                             continue
                         column_type = column_type.lower()
-                        if column_type not in cls.COLUMN_TYPES:
-                            continue
-                        table.schema[column_name] = (cls.COLUMN_TYPES[column_type], Compiler.TYPE_FILTERS.get(column_type))
+                        if column_type in cls.COLUMN_TYPES:
+                            table.schema[column_name] = (cls.COLUMN_TYPES[column_type], Compiler.TYPE_FILTERS.get(column_type))
+                        else:
+                            try:
+                                filter_cls = find_filter(column_type)
+                                if filter_cls:
+                                    table.schema[column_name] = (filter_cls.SqlColumnType
+                                                                 if hasattr(filter_cls, "SqlColumnType")
+                                                                 else ColumnType.VARCHAR, column_type)
+                            except:
+                                pass
                 except Exception as e:
                     get_logger().warning("load meta file error %s %s", filename, str(e))
             if not tables:
