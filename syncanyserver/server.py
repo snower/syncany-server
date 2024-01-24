@@ -35,6 +35,7 @@ class ServerSessionExecuterContext(ExecuterContext):
         super(ServerSessionExecuterContext, self).__init__(*args, **kwargs)
 
         self.memory_database_collection = MemoryDBCollection()
+        self.execting_primary_tables = None
 
     def context(self, session):
         executor = Executor(self.engine.manager, self.executor.session_config.session(), self.executor)
@@ -278,9 +279,10 @@ class ServerSession(Session):
             return [], []
 
         with self.executer_context.context(self) as executer_context:
-            primary_tables = self.parse_primary_tables(expression, defaultdict(list))
-            if primary_tables:
-                self.execute_tables(executer_context, primary_tables, self.parse_primary_variable_sqls(expression))
+            executer_context.execting_primary_tables = self.parse_primary_tables(expression, defaultdict(list))
+            if executer_context.execting_primary_tables:
+                self.execute_tables(executer_context, executer_context.execting_primary_tables,
+                                    self.parse_primary_variable_sqls(expression))
             joins_tables = self.parse_join_tables(expression, defaultdict(list))
             if joins_tables:
                 self.execute_tables(executer_context, joins_tables, self.parse_joins_variable_sqls(expression))
@@ -652,6 +654,13 @@ class Server(MysqlServer):
                 else:
                     db_name = join_tables[table_name]["db"] if table_name in join_tables else None
                 db_table_name = table_name
+            if db_name == "--":
+                executer_context = ExecuterContext.current()
+                if executer_context and isinstance(executer_context, ServerSessionExecuterContext):
+                    if executer_context.execting_primary_tables:
+                        for primary_table_db, primary_table_name in executer_context.execting_primary_tables:
+                            if primary_table_name == table_name:
+                                db_name = primary_table_db
             if not db_name or db_name not in self.databases:
                 return False
             table_schema = self.databases[db_name].get_table_schema(table_name)
@@ -666,7 +675,7 @@ class Server(MysqlServer):
                     "origin_name": name,
                     "typing_name": "",
                     "dot_keys": [],
-                    "typing_filters": [column[1]],
+                    "typing_filters": [column[1]] if column and len(column) >= 2 and column[1] else [],
                     "typing_options": [],
                     "expression": expression
                 }
