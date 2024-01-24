@@ -559,6 +559,7 @@ class ServerSession(Session):
 class Server(MysqlServer):
     origin_parse_table = Compiler.parse_table
     origin_parse_column = Compiler.parse_column
+    origin_compile_select_star_column = Compiler.compile_select_star_column
 
     def __init__(self, host=None, port=3306, config_path=".", username=None, password=None,
                  executor_max_workers=5, executor_wait_timeout=120):
@@ -637,8 +638,45 @@ class Server(MysqlServer):
             column_info["typing_filters"] = [table_schema[column_info["column_name"]][1]]
             return column_info
 
+        def compile_select_star_column(compiler, expression, config, arguments, primary_table, join_tables):
+            if Server.origin_compile_select_star_column(compiler, expression, config, arguments,
+                                                        primary_table, join_tables):
+                return True
+            if isinstance(expression, sqlglot_expressions.Star):
+                db_name, table_name = primary_table["db"], primary_table["name"]
+                db_table_name = primary_table["table_alias"] or primary_table["table_name"]
+            else:
+                table_name = expression.args["table"].name
+                if table_name == primary_table["table_alias"]:
+                    db_name = primary_table["db"]
+                else:
+                    db_name = join_tables[table_name]["db"] if table_name in join_tables else None
+                db_table_name = table_name
+            if not db_name or db_name not in self.databases:
+                return False
+            table_schema = self.databases[db_name].get_table_schema(table_name)
+            if table_schema is None:
+                return False
+            for name, column in table_schema.items():
+                if name in config["schema"]:
+                    continue
+                column_info = {
+                    "table_name": db_table_name,
+                    "column_name": name,
+                    "origin_name": name,
+                    "typing_name": "",
+                    "dot_keys": [],
+                    "typing_filters": [column[1]],
+                    "typing_options": [],
+                    "expression": expression
+                }
+                compiler.compile_select_column(expression, config, arguments, primary_table, name,
+                                               column_info, join_tables)
+            return True
+
         Compiler.parse_table = parse_table
         Compiler.parse_column = parse_column
+        Compiler.compile_select_star_column = compile_select_star_column
         await super(Server, self).start_server(host=self.host, port=self.port,
                                                reuse_port=True if sys.platform != "win32" else None,
                                                backlog=512, **kwargs)
