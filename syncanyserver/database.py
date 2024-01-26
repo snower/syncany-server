@@ -85,7 +85,10 @@ class Database(object):
                 if not os.path.isfile(os.path.join(dirpath, filename)):
                     continue
                 table_name, fileext = os.path.splitext(filename)
-                if fileext in (".sql", ".sqlx"):
+                if not table_name or not fileext:
+                    continue
+                fileext = fileext.lower()
+                if fileext in (".sql", ".sqlx", ".prql"):
                     sql_filenames.append((table_name, os.path.join(dirpath, filename)))
                 elif fileext in (".json", ".yaml") and table_name.endswith(".meta"):
                     meta_filenames.append((table_name[:-5], os.path.join(dirpath, filename)))
