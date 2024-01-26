@@ -126,6 +126,7 @@ class Database(object):
                         tables.append(table)
                     for column_name, column_type in table_meta["schema"].items():
                         if not column_type or not isinstance(column_type, str):
+                            table.schema[column_name] = (ColumnType.VARCHAR, None)
                             continue
                         column_type = column_type.lower()
                         if column_type in cls.COLUMN_TYPES:
@@ -138,7 +139,7 @@ class Database(object):
                                                                  if hasattr(filter_cls, "SqlColumnType")
                                                                  else ColumnType.VARCHAR, column_type)
                             except:
-                                pass
+                                table.schema[column_name] = (ColumnType.VARCHAR, None)
                 except Exception as e:
                     get_logger().warning("load meta file error %s %s", filename, str(e))
             if not tables:
