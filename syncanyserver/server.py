@@ -70,26 +70,21 @@ class ServerSessionExecuterContext(ExecuterContext):
 
     def execute_expression(self, expression, output_name=None):
         with self.executor as executor:
-            config = executor.session_config.get()
-            config["name"] = "session[%s-%d]" % (id(self.session), self.session.execute_index)
-            try:
-                compiler = Compiler(config, executor.env_variables)
-                arguments = {"@verbose": executor.env_variables.get("@verbose", False),
-                             "@timeout": executor.env_variables.get("@timeout", 0),
-                             "@limit": executor.env_variables.get("@limit", 0),
-                             "@batch": executor.env_variables.get("@batch", 0),
-                             "@streaming": executor.env_variables.get("@streaming", False),
-                             "@recovery": executor.env_variables.get("@recovery", False),
-                             "@join_batch": executor.env_variables.get("@join_batch", 10000),
-                             "@insert_batch": executor.env_variables.get("@insert_batch", 0),
-                             "@primary_order": False}
-                tasker = compiler.compile_expression(expression, arguments)
-            finally:
-                config["name"] = ""
+            name = "session[%s-%d]" % (id(self.session), self.session.execute_index)
+            compiler = Compiler(executor.session_config, executor.env_variables, name)
+            arguments = {"@verbose": executor.env_variables.get("@verbose", False),
+                         "@timeout": executor.env_variables.get("@timeout", 0),
+                         "@limit": executor.env_variables.get("@limit", 0),
+                         "@batch": executor.env_variables.get("@batch", 0),
+                         "@streaming": executor.env_variables.get("@streaming", False),
+                         "@recovery": executor.env_variables.get("@recovery", False),
+                         "@join_batch": executor.env_variables.get("@join_batch", 10000),
+                         "@insert_batch": executor.env_variables.get("@insert_batch", 0),
+                         "@primary_order": False}
+            tasker = compiler.compile_expression(expression, arguments)
             if output_name and isinstance(tasker, QueryTasker):
                 tasker.config["output"] = "&." + output_name + "::" + tasker.config["output"].split("::")[-1]
-            executor.runners.extend(tasker.start(config["name"], executor, executor.session_config, executor.manager,
-                                                 arguments))
+            executor.runners.extend(tasker.start(name, executor, executor.session_config, executor.manager, arguments))
             executor.execute()
 
 class MySQL(sqlglot_dialects.MySQL):
