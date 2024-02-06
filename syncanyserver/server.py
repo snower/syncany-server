@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # 2023/5/4
 # create by: snower
+
 import decimal
 import json
 import sys
@@ -10,7 +11,6 @@ import datetime
 from collections import defaultdict
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-
 from mysql_mimic.types import ColumnType
 from sqlglot import expressions as sqlglot_expressions
 from sqlglot import dialects as sqlglot_dialects
@@ -21,7 +21,7 @@ from mysql_mimic.intercept import expression_to_value
 from syncany.logger import get_logger
 from syncany.taskers.manager import TaskerManager
 from syncany.database.memory import MemoryDBCollection
-from syncanysql.compiler import Compiler
+from syncanysql.compiler import Compiler, AssignParameter
 from syncanysql.taskers.query import QueryTasker
 from syncanysql import ScriptEngine, Executor, ExecuterContext, SqlSegment, SqlParser
 from syncanysql.parser import FileParser
@@ -87,8 +87,19 @@ class ServerSessionExecuterContext(ExecuterContext):
             executor.runners.extend(tasker.start(name, executor, executor.session_config, executor.manager, arguments))
             executor.execute()
 
+
 class MySQL(sqlglot_dialects.MySQL):
     class Parser(sqlglot_dialects.MySQL.Parser):
+        def _parse_parameter(self):
+            wrapped = self._match(sqlglot_parser.TokenType.L_BRACE)
+            this = self._parse_var() or self._parse_primary()
+            self._match(sqlglot_parser.TokenType.R_BRACE)
+            if not self._match_pair(sqlglot_parser.TokenType.COLON, sqlglot_parser.TokenType.EQ, False):
+                return self.expression(sqlglot_expressions.Parameter, this=this, wrapped=wrapped)
+            self._advance(2)
+            expression = self._parse_conjunction() or self._parse_function() or self._parse_id_var()
+            return self.expression(AssignParameter, this=this, expression=expression, wrapped=wrapped)
+
         def _parse_limit(self, this=None, top=False):
             if top or not self._match(sqlglot_parser.TokenType.LIMIT, False):
                 return sqlglot_parser.Parser._parse_limit(self, this, top)
@@ -119,6 +130,17 @@ class MySQL(sqlglot_dialects.MySQL):
             self._advance(4)
             return self.expression(sqlglot_parser.exp.Offset, this=this,
                                    expression=self.PRIMARY_PARSERS[sqlglot_parser.TokenType.NUMBER](self, offset_token))
+
+    class Generator(sqlglot_dialects.MySQL.Generator):
+        TRANSFORMS = {
+            **sqlglot_dialects.MySQL.Generator.TRANSFORMS,
+            AssignParameter: lambda self, e: self.assign_parameter_sql(e),
+        }
+
+        def assign_parameter_sql(self, expression):
+            this = self.sql(expression, "this")
+            this = f"{{{this}}}" if expression.args.get("wrapped") else f"{this}"
+            return f"""{self.PARAMETER_TOKEN}{this} := {self.sql(expression, "expression")}"""
 
 
 class ServerSession(Session):
@@ -193,7 +215,7 @@ class ServerSession(Session):
                 try:
                     with executer_context.executor as executor:
                         executor.run("session[%d-%d]" % (id(self), self.execute_index),
-                                     [SqlSegment("set " + str(setitem), 1)])
+                                     [SqlSegment("set " + self.generate_sql(setitem), 1)])
                         executor.execute()
                 except Exception as e:
                     raise MysqlError(str(e), code=ErrorCode.NOT_SUPPORTED_YET)
@@ -230,7 +252,7 @@ class ServerSession(Session):
             if isinstance(expression, sqlglot_expressions.Select) and \
                     not any(expression.args.get(a)
                             for a in set(sqlglot_expressions.Select.arg_types) - {"expressions", "limit", "hint"}):
-                return await self.query(expression, str(expression), {})
+                return await self.query(expression, self.generate_sql(expression), {})
             return None
         except Exception:
             return super(ServerSession, self)._static_query_interceptor(expression)
@@ -425,7 +447,7 @@ class ServerSession(Session):
                         return
                 name = condition_expression.args["this"].name
                 primary_variable_sqls[(database_name, table_name)].append(
-                    "SELECT %s as %s INTO @%s" % (str(condition_expression.args["expression"]), name, name))
+                    "SELECT %s as %s INTO @%s" % (self.generate_sql(condition_expression.args["expression"]), name, name))
             elif isinstance(condition_expression, (sqlglot_expressions.GT, sqlglot_expressions.GTE,
                                                    sqlglot_expressions.LT, sqlglot_expressions.LTE,
                                                    sqlglot_expressions.NEQ)):
@@ -439,7 +461,7 @@ class ServerSession(Session):
                         return
                 name = "%s__%s" % (condition_expression.args["this"].name, condition_expression.key.lower())
                 primary_variable_sqls[(database_name, table_name)].append(
-                    "SELECT %s as %s INTO @%s" % (str(condition_expression.args["expression"]), name, name))
+                    "SELECT %s as %s INTO @%s" % (self.generate_sql(condition_expression.args["expression"]), name, name))
 
         database_name, table_name, table_alias = None, None, None
         from_expression = expression.args.get("from")
@@ -466,7 +488,7 @@ class ServerSession(Session):
                     order_table_name = order_expression.args["this"].args["table"].name
                     if order_table_name and order_table_name != table_name:
                         continue
-                order_bys.append(str(order_expression))
+                order_bys.append(self.generate_sql(order_expression))
             if order_bys:
                 primary_variable_sqls[(database_name, table_name)].append(
                     "SELECT '%s' as %s INTO @%s" % (",".join(order_bys), "order_by", "order_by"))
@@ -507,7 +529,7 @@ class ServerSession(Session):
                         return
                 name = condition_expression.args["this"].name
                 joins_variable_sqls[(database_name, table_name)].append(
-                    "SELECT %s as %s INTO @%s" % (str(condition_expression.args["expression"]), name, name))
+                    "SELECT %s as %s INTO @%s" % (self.generate_sql(condition_expression.args["expression"]), name, name))
             elif isinstance(condition_expression, (sqlglot_expressions.GT, sqlglot_expressions.GTE,
                                                    sqlglot_expressions.LT, sqlglot_expressions.LTE,
                                                    sqlglot_expressions.NEQ)):
@@ -521,7 +543,7 @@ class ServerSession(Session):
                         return
                 name = "%s__%s" % (condition_expression.args["this"].name, condition_expression.key.lower())
                 joins_variable_sqls[(database_name, table_name)].append(
-                    "SELECT %s as %s INTO @%s" % (str(condition_expression.args["expression"]), name, name))
+                    "SELECT %s as %s INTO @%s" % (self.generate_sql(condition_expression.args["expression"]), name, name))
 
         for join_expression in joins_expression:
             table_expression = join_expression.args["this"]
@@ -551,6 +573,11 @@ class ServerSession(Session):
             if self.has_column(child_expression):
                 return True
         return False
+
+    def generate_sql(self, expression):
+        if isinstance(expression, sqlglot_expressions.Expression):
+            return expression.sql(dialect=MySQL)
+        return str(expression)
 
 
 class Server(MysqlServer):
