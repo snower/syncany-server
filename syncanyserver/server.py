@@ -28,6 +28,9 @@ from syncanysql.parser import FileParser
 from .user import UserIdentityProvider
 from .database import DatabaseManager, Database
 
+SQL_COMMON_TYPES = (bool, int, float, str, bytes, datetime.date, datetime.time, decimal.Decimal)
+SQL_COMPLICACY_TYPES = (set, map, list, tuple)
+
 
 class ServerSessionExecuterContext(ExecuterContext):
     def __init__(self, *args, **kwargs):
@@ -336,12 +339,15 @@ class ServerSession(Session):
                     return value
                 if isinstance(value, datetime.datetime):
                     return datetime.datetime(value.year, value.month, value.day, value.hour, value.minute, value.second)
-                if isinstance(value, (bool, int, float, str, bytes, datetime.date, datetime.time, decimal.Decimal)):
+                if isinstance(value, SQL_COMMON_TYPES):
                     return value
-                if isinstance(value, (set, map, list, tuple)):
+                if isinstance(value, SQL_COMPLICACY_TYPES):
                     return json.dumps(value, default=str, ensure_ascii=False)
                 return str(value)
-            return [tuple(format_value(data[key]) for key in keys) for data in datas], keys
+            for i in range(len(datas)):
+                data = datas[i]
+                datas[i] = tuple(format_value(data[key]) for key in keys)
+            return datas, keys
 
     async def schema(self):
         user_databases = await self.identity_provider.get_databases(self.username)
