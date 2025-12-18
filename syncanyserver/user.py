@@ -47,7 +47,11 @@ class UserIdentityProvider(IdentityProvider):
         if self.users is None:
             self.load_users()
         user = self.users.get(username)
-        return (permission in user["permissions"]) if user and "permissions" in user else False
+        if not user:
+            return False
+        if permission == "temporary_memory_table":
+            return (permission in user["permissions"]) if "permissions" in user else True
+        return (permission in user["permissions"]) if "permissions" in user else False
 
     def load_users(self):
         users = {}

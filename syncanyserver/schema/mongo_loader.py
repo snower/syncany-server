@@ -2,11 +2,109 @@
 # 2025/11/21
 # create by: snower
 
+from syncany.logger import get_logger
+from ..table import Table
 from .loader import SchemaLoader
+from mysql_mimic.types import ColumnType
+from bson import ObjectId, Binary, Timestamp
+from datetime import datetime
+from decimal import Decimal
+import uuid
+
 
 class MongoSchemaLoader(SchemaLoader):
     def load_tables(self, script_engine, database, connection):
-        pass
+        try:
+            # 获取所有集合名称
+            collection_names = connection[database.db_name].list_collection_names()
+            if not collection_names:
+                return []
+            
+            tables = []
+            for collection_name in collection_names:
+                table = self.load_table(script_engine, database, connection, collection_name)
+                if not table:
+                    continue
+                tables.append(table)
+            return tables
+        except Exception as e:
+            get_logger().warning("load mongodb database collections error %s", str(e))
+            return []
 
     def load_table(self, script_engine, database, connection, table_name):
-        pass
+        try:
+            # 获取前10行数据来分析结构
+            db = connection[database.db_name]
+            sample_docs = list(db[table_name].find().limit(10))
+            
+            if not sample_docs:
+                # 如果没有数据，则创建一个空表
+                return Table(table_name, "&" + database.name, {
+                    "_id": (ColumnType.VARCHAR, None)
+                })
+            
+            # 分析所有文档的字段类型
+            field_types = {}
+            for doc in sample_docs:
+                self._analyze_document(doc, field_types)
+            
+            # 将字段信息转换为字段名到ColumnType的映射
+            column_types = {}
+            for field_name, type_info in field_types.items():
+                column_types[field_name] = (self._map_mongo_type(type_info), None)
+            
+            return Table(table_name, "&" + database.name, column_types)
+        except Exception as e:
+            get_logger().warning("load mongodb collection %s schema error %s", table_name, str(e))
+            return None
+
+    def _analyze_document(self, doc, field_types, prefix=""):
+        """
+        递归分析文档结构
+        """
+        for key, value in doc.items():
+            field_path = f"{prefix}.{key}" if prefix else key
+            
+            if field_path not in field_types:
+                field_types[field_path] = set()
+            if value is None:
+                field_types[field_path].add(type(None))
+            elif isinstance(value, dict):
+                field_types[field_path].add(dict)
+            elif isinstance(value, list):
+                field_types[field_path].add(list)
+            else:
+                field_types[field_path].add(type(value))
+
+    def _map_mongo_type(self, type_info):
+        """
+        将MongoDB数据类型映射到ColumnType枚举值
+        """
+        # 取主要类型进行映射
+        primary_type = list(type_info)[0] if type_info else str
+        
+        type_mapping = {
+            int: ColumnType.LONG,
+            float: ColumnType.DOUBLE,
+            str: ColumnType.VARCHAR,
+            bool: ColumnType.BOOL,
+            datetime: ColumnType.DATETIME,
+            bytes: ColumnType.BLOB,
+            ObjectId: ColumnType.VARCHAR,  # ObjectId转为字符串
+            dict: ColumnType.JSON,         # 嵌套文档转为JSON
+            list: ColumnType.JSON,         # 数组转为JSON
+            type(None): ColumnType.NULL # 默认为字符串
+        }
+        
+        # 处理特殊的BSON类型
+        if primary_type == Binary:
+            return ColumnType.BLOB
+        elif primary_type == Decimal:
+            return ColumnType.DECIMAL
+        elif primary_type == uuid.UUID:
+            return ColumnType.VARCHAR
+        elif primary_type == Timestamp:
+            return ColumnType.TIMESTAMP
+        else:
+            # 默认返回VARCHAR类型
+            return type_mapping.get(primary_type, ColumnType.VARCHAR)
