@@ -70,8 +70,11 @@ class Database(object):
         return None
 
     @classmethod
-    def scan_databases(cls, config_path, script_engine, databases):
+    def scan_databases(cls, config_path, script_engine, databases, is_scan_database):
         new_databases = {}
+        if is_scan_database:
+            from .schema import load_database_schemas
+            load_database_schemas(script_engine, new_databases)
         for dirname in ([config_path] + list(os.listdir(config_path))):
             dirpath = config_path if dirname == config_path else os.path.join(config_path, dirname)
             if not os.path.isdir(dirpath):
@@ -149,7 +152,15 @@ class Database(object):
                     get_logger().warning("load meta file error %s %s", filename, str(e))
             if not tables:
                 continue
-            new_databases[database_name] = Database(database_name, tables)
+            if database_name in new_databases:
+                load_tables = {new_databases[database_name].tables[i].name: i for i in range(len(new_databases[database_name].tables))}
+                for table in tables:
+                    if table.name in load_tables:
+                        new_databases[database_name].tables[load_tables[table.name]] = table
+                        continue
+                    new_databases[database_name].tables.append(table)
+            else:
+                new_databases[database_name] = Database(database_name, tables)
         databases.clear()
         databases.update(new_databases)
         get_logger().info("scan databases finish, find databases: %s", ",".join(list(databases.keys())))

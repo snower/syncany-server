@@ -39,6 +39,9 @@ def main():
     parser.add_argument('-W', "--executor_wait_timeout", dest='executor_wait_timeout', default=120, type=int,
                         help='The maximum waiting seconds time before the SQL query task is submitted to '
                              'the ThreadPoolExecutor for execution (default: 120 seconds)')
+    parser.add_argument('-S', "--scan_database", dest='is_scan_database', nargs='?',
+                        const=True, default=False, type=bool,
+                        help='is scan database load table structure information (default: False)')
     args = parser.parse_args()
     if args.config_path:
         os.chdir(os.path.abspath(args.config_path))
@@ -46,7 +49,8 @@ def main():
             sys.path.insert(0, args.config_path)
     asyncio.run(Server(args.bind, args.port, os.path.abspath(args.config_path),
                        args.username, args.password,
-                       args.executor_max_workers, args.executor_wait_timeout)
+                       args.executor_max_workers, args.executor_wait_timeout,
+                       args.is_scan_database)
                 .serve_forever())
 
 

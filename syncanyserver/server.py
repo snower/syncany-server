@@ -191,6 +191,11 @@ class ServerSession(Session):
                     return [], ('Name', 'Engine', 'Version', 'Row_format', 'Rows', 'Avg_row_length', 'Data_length',
                                 'Max_data_length', 'Index_length', 'Data_free', 'Auto_increment', 'Create_time',
                                 'Update_time', 'Check_time', 'Collation', 'Checksum', 'Create_options', 'Comment')
+                if "show variables" in sql or "show session variables":
+                    return [], ('Variable_name', 'Value')
+                if "show columns" in sql:
+                    return [], ('Field', 'Type', 'Collation', 'Null', 'Key', 'Default', 'Extra', 'Privileges',
+                                'Comment')
                 return [], []
         return await super(ServerSession, self).handle_query(sql, attrs)
 
@@ -392,9 +397,10 @@ class ServerSession(Session):
                 if isinstance(table_expression, sqlglot_expressions.Table):
                     database_name = table_expression.args["db"].name if table_expression.args.get("db") else None
                     table_name = table_expression.args["this"].name
-                    if self.databases.get(database_name or self.database) \
-                            and self.databases.get(database_name or self.database).get_table(table_name):
-                        tables[database_name, table_name].append(table_expression)
+                    if self.databases.get(database_name or self.database):
+                        table = self.databases.get(database_name or self.database).get_table(table_name)
+                        if table and not table.filename.startswith("&"):
+                            tables[database_name, table_name].append(table_expression)
         if isinstance(expression, sqlglot_expressions.Insert):
             if isinstance(expression.args["expression"], (sqlglot_expressions.Select, sqlglot_expressions.Union)):
                 self.parse_primary_tables(expression.args["expression"], tables)
@@ -592,7 +598,7 @@ class Server(MysqlServer):
     origin_compile_select_star_column = Compiler.compile_select_star_column
 
     def __init__(self, host=None, port=3306, config_path=".", username=None, password=None,
-                 executor_max_workers=5, executor_wait_timeout=120):
+                 executor_max_workers=5, executor_wait_timeout=120, is_scan_database=False):
         super(Server, self).__init__(session_factory=self.create_session,
                                      identity_provider=UserIdentityProvider(config_path, username, password))
 
@@ -601,6 +607,7 @@ class Server(MysqlServer):
         self.config_path = config_path
         self.executor_max_workers = executor_max_workers
         self.executor_wait_timeout = executor_wait_timeout
+        self.is_scan_database = is_scan_database
         self.script_engine = None
         self.thread_pool_executor = None
         self.databases = {}
@@ -630,7 +637,7 @@ class Server(MysqlServer):
                 executor.execute()
         self.thread_pool_executor = ThreadPoolExecutor(self.executor_max_workers)
         self.identity_provider.load_users()
-        Database.scan_databases(self.config_path, self.script_engine, self.databases)
+        Database.scan_databases(self.config_path, self.script_engine, self.databases, self.is_scan_database)
 
     async def start_server(self, **kwargs):
         self.setup_script_engine()
