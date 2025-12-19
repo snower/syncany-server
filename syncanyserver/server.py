@@ -29,7 +29,7 @@ from .user import UserIdentityProvider
 from .database import DatabaseManager, Database
 
 SQL_COMMON_TYPES = (bool, int, float, str, bytes, datetime.date, datetime.time, decimal.Decimal)
-SQL_COMPLICACY_TYPES = (set, map, list, tuple)
+SQL_COMPLICACY_TYPES = (set, dict, list, tuple)
 
 
 class ServerSessionExecuterContext(ExecuterContext):
