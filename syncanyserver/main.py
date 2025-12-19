@@ -5,6 +5,7 @@
 import os
 import argparse
 import asyncio
+import signal
 import sys
 from .server import Server
 
@@ -47,11 +48,16 @@ def main():
         os.chdir(os.path.abspath(args.config_path))
         if args.config_path not in sys.path:
             sys.path.insert(0, args.config_path)
-    asyncio.run(Server(args.bind, args.port, os.path.abspath(args.config_path),
-                       args.username, args.password,
-                       args.executor_max_workers, args.executor_wait_timeout,
-                       args.is_scan_database)
-                .serve_forever())
+    loop = asyncio.get_event_loop()
+    if sys.platform != "win32":
+        loop.add_signal_handler(signal.SIGHUP, lambda s: loop.stop(), signal.SIGHUP)
+        loop.add_signal_handler(signal.SIGTERM, lambda s: loop.stop(), signal.SIGTERM)
+    loop.create_task(Server(args.bind, args.port, os.path.abspath(args.config_path),
+                    args.username, args.password,
+                    args.executor_max_workers, args.executor_wait_timeout,
+                    args.is_scan_database)
+             .serve_forever())
+    loop.run_forever()
 
 
 if __name__ == "__main__":
