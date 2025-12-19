@@ -39,12 +39,45 @@ class ServerSessionExecuterContext(ExecuterContext):
 
         self.memory_database_collection = MemoryDBCollection()
         self.execting_primary_tables = None
+        self.transaction_contexts = None
+
+    def present(self):
+        if self.transaction_contexts:
+            return self.transaction_contexts[-1].present()
+        return self
 
     def context(self, session):
+        if self.transaction_contexts:
+            return self.transaction_contexts[-1].context(session)
         executor = Executor(self.engine.manager, self.executor.session_config.session(), self.executor)
         executer_context = ServerSessionExecuterContext(self.engine, executor, session=session)
         executer_context.memory_database_collection.update(self.memory_database_collection)
         return executer_context
+
+    def begin_transaction(self, session):
+        executor = Executor(self.engine.manager, self.executor.session_config.session(), self.executor)
+        executer_context = ServerSessionExecuterContext(self.engine, executor, session=session)
+        executer_context.memory_database_collection.update(self.memory_database_collection)
+        if self.transaction_contexts is None:
+            self.transaction_contexts = [executer_context]
+        else:
+            self.transaction_contexts.append(executer_context)
+
+    def commit_transaction(self, session):
+        if not self.transaction_contexts:
+            self.memory_database_collection.clear()
+            return
+        self.transaction_contexts.pop()
+        if not self.transaction_contexts:
+            self.transaction_contexts = None
+
+    def rollback_transaction(self, session):
+        if not self.transaction_contexts:
+            self.memory_database_collection.clear()
+            return
+        self.transaction_contexts.pop()
+        if not self.transaction_contexts:
+            self.transaction_contexts = None
 
     def execute(self, sql):
         if not self.session:
@@ -89,6 +122,16 @@ class ServerSessionExecuterContext(ExecuterContext):
                 tasker.config["output"] = "&." + output_name + "::" + tasker.config["output"].split("::")[-1]
             executor.runners.extend(tasker.start(name, executor, executor.session_config, executor.manager, arguments))
             executor.execute()
+
+    def commit_memory_datas(self, table_name, datas):
+        if self.transaction_contexts:
+            return self.transaction_contexts[-1].commit_memory_datas(table_name, datas)
+        self.memory_database_collection["--." + table_name] = datas
+
+    def rollback_memory_datas(self, table_name):
+        if self.transaction_contexts:
+            return self.transaction_contexts[-1].rollback_memory_datas(table_name)
+        self.memory_database_collection.remove("--." + table_name)
 
 
 class MySQL(sqlglot_dialects.MySQL):
@@ -163,40 +206,48 @@ class ServerSession(Session):
         self.execute_index = 0
 
     async def handle_query(self, sql, attrs):
-        if sql[:5].lower() == "show " or sql[:4].lower() == "set " or sql[:5].lower() == "kill " \
-                or "information_schema" in sql.lower():
+        lower_sql = sql.lower()
+        if lower_sql[:5] == "show " or lower_sql[:4] == "set " or lower_sql[:5] == "kill " or "information_schema" in lower_sql:
             try:
                 return await super(ServerSession, self).handle_query(sql, attrs)
             except:
-                sql = sql.lower()
-                if "show character set" in sql:
+                if "show character set" in lower_sql:
                     return [('utf8mb4', 'UTF-8 Unicode', 'utf8mb4_general_ci', '4')], ('Charset', 'Description',
                                                                                        'Default collation', 'Maxlen')
-                if "show engines" in sql:
+                if "show engines" in lower_sql:
                     return [('InnoDB', 'DEFAULT', 'Supports transactions, row-level locking, and foreign keys', 'YES',
                              'YES', 'YES')], ('Engine', 'Support', 'Comment', 'Transactions', 'XA', 'Savepoints')
-                if "show charset" in sql:
+                if "show charset" in lower_sql:
                     return [('utf8', 'UTF-8 Unicode', 'utf8_general_ci', '3')], ['Charset', 'Description',
                                                                                  'Default collation', 'Maxlen']
-                if "show collation" in sql:
+                if "show collation" in lower_sql:
                     return [('utf8_unicode_ci', 'utf8', '192', '', 'Yes', '8')], ('Collation', 'Charset', 'Id',
                                                                                   'Default', 'Compiled', 'Sortlen')
-                if "show procedure status" in sql:
+                if "show procedure status" in lower_sql:
                     return [], ('Db', 'Name', 'Type', 'Definer', 'Modified', 'Created', 'Security_type', 'Comment',
                                 'character_set_client', 'collation_connection', 'Database Collation')
-                if "show function status" in sql:
+                if "show function status" in lower_sql:
                     return [], ('Db', 'Name', 'Type', 'Definer', 'Modified', 'Created', 'Security_type', 'Comment',
                                 'character_set_client', 'collation_connection', 'Database Collation')
-                if "show table status" in sql:
+                if "show table status" in lower_sql:
                     return [], ('Name', 'Engine', 'Version', 'Row_format', 'Rows', 'Avg_row_length', 'Data_length',
                                 'Max_data_length', 'Index_length', 'Data_free', 'Auto_increment', 'Create_time',
                                 'Update_time', 'Check_time', 'Collation', 'Checksum', 'Create_options', 'Comment')
-                if "show variables" in sql or "show session variables":
+                if "show variables" in lower_sql or "show session variables":
                     return [], ('Variable_name', 'Value')
-                if "show columns" in sql:
+                if "show columns" in lower_sql:
                     return [], ('Field', 'Type', 'Collation', 'Null', 'Key', 'Default', 'Extra', 'Privileges',
                                 'Comment')
                 return [], []
+        if lower_sql == "begin":
+            self.executer_context.begin_transaction(self)
+            return [], []
+        if lower_sql == "commit":
+            self.executer_context.commit_transaction(self)
+            return [], []
+        if lower_sql == "rollback":
+            self.executer_context.rollback_transaction(self)
+            return [], []
         return await super(ServerSession, self).handle_query(sql, attrs)
 
     def _set_variable(self, setitem):
@@ -219,7 +270,7 @@ class ServerSession(Session):
         if scope in {"SESSION", "LOCAL"}:
             self.variables.set(name, value)
         if self.executer_context:
-            with self.executer_context as executer_context:
+            with self.executer_context.present() as executer_context:
                 try:
                     with executer_context.executor as executor:
                         executor.run("session[%d-%d]" % (id(self), self.execute_index),
@@ -286,8 +337,7 @@ class ServerSession(Session):
                 raise result
             return result
         finally:
-            get_logger().info("session[%d-%d] query SQL finish %.2fms", id(self), self.execute_index,
-                              (time.time() - start_time) * 1000)
+            get_logger().info("session[%d-%d] query SQL finish %.2fms", id(self), self.execute_index, (time.time() - start_time) * 1000)
 
     def execute_query(self, expression, start_time):
         executor_wait_timeout = self.variables.values.get("wait_timeout") or self.executor_wait_timeout
@@ -322,11 +372,13 @@ class ServerSession(Session):
                     if not table_name or table_name in (".txt", ".csv", ".json") or table_name.lower().startswith("file://") \
                             or os.path.splitext(os.path.split(table_name)[-1])[-1] in (".txt", ".json", ".csv", ".xls", ".xlsx"):
                         raise MysqlError("readonly", code=ErrorCode.ACCESS_DENIED_ERROR)
+                if (database_name is None or database_name in self.databases) and table_name:
+                    executer_context.rollback_memory_datas(table_name)
                 executer_context.execute_expression(expression)
                 if (database_name is None or database_name in self.databases) and table_name:
                     datas = executer_context.pop_memory_datas(table_name)
                     if datas:
-                        self.executer_context.memory_database_collection[table_name] = datas
+                        self.executer_context.commit_memory_datas(table_name, datas)
                 return [], []
             if isinstance(expression, sqlglot_expressions.Delete):
                 executer_context.execute_expression(expression)
@@ -373,8 +425,7 @@ class ServerSession(Session):
             table = database.get_table(table_name)
             if not table:
                 continue
-            with Executor(executer_context.engine.manager, executer_context.executor.session_config.session(),
-                          executer_context.executor) as executor:
+            with Executor(executer_context.engine.manager, executer_context.executor.session_config.session(), executer_context.executor) as executor:
                 table_variable_sqls = variable_sqls.get((database_name, table_name))
                 if table_variable_sqls:
                     executor.run("session[%d-%d]" % (id(self), self.execute_index),
