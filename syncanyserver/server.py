@@ -196,7 +196,7 @@ class ServerSession(Session):
                  executor_wait_timeout, *args, **kwargs):
         super(ServerSession, self).__init__(*args, **kwargs)
 
-        self.loop = asyncio.get_event_loop()
+        self.loop = asyncio.get_running_loop()
         self.config_path = config_path
         self.executer_context = executer_context
         self.identity_provider = identity_provider

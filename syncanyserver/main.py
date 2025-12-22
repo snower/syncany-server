@@ -51,15 +51,18 @@ def main():
         os.chdir(os.path.abspath(args.config_path))
         if args.config_path not in sys.path:
             sys.path.insert(0, args.config_path)
-    loop = asyncio.get_event_loop()
-    server = Server(args.bind, args.port, os.path.abspath(args.config_path),
-           args.username, args.password,
-           args.executor_max_workers, args.executor_wait_timeout,
-           args.is_scan_database, False if args.writable_execute else True)
-    if sys.platform != "win32":
-        loop.add_signal_handler(signal.SIGHUP, lambda s: loop.call_later(0, lambda: server.close()), signal.SIGHUP)
-        loop.add_signal_handler(signal.SIGTERM, lambda s: loop.call_later(0, lambda: server.close()), signal.SIGTERM)
-    loop.run_until_complete(server.serve_forever())
+
+    async def serve_forever():
+        server = Server(args.bind, args.port, os.path.abspath(args.config_path),
+               args.username, args.password,
+               args.executor_max_workers, args.executor_wait_timeout,
+               args.is_scan_database, False if args.writable_execute else True)
+        if sys.platform != "win32":
+            loop = asyncio.get_running_loop()
+            loop.add_signal_handler(signal.SIGHUP, lambda s: loop.call_later(0, lambda: server.close()), signal.SIGHUP)
+            loop.add_signal_handler(signal.SIGTERM, lambda s: loop.call_later(0, lambda: server.close()), signal.SIGTERM)
+        await server.serve_forever()
+    asyncio.run(serve_forever())
 
 
 if __name__ == "__main__":
