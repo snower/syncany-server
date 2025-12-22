@@ -15,6 +15,7 @@ import uuid
 class MongoSchemaLoader(SchemaLoader):
     def load_tables(self, script_engine, database, connection):
         try:
+            get_logger().info("schema scan loading mongodb database %s collections", database.name)
             # 获取所有集合名称
             collection_names = connection[database.db_name].list_collection_names()
             if not collection_names:
@@ -26,9 +27,10 @@ class MongoSchemaLoader(SchemaLoader):
                 if not table:
                     continue
                 tables.append(table)
+            get_logger().info("schema scan loaded mongodb database %s collections count %d", database.name, len(tables))
             return tables
         except Exception as e:
-            get_logger().warning("load mongodb database collections error %s", str(e))
+            get_logger().warning("schema scan load mongodb database %s collections error %s", database.name, str(e))
             return []
 
     def load_table(self, script_engine, database, connection, table_name):
@@ -55,7 +57,7 @@ class MongoSchemaLoader(SchemaLoader):
             
             return Table(table_name, "&" + database.name, column_types)
         except Exception as e:
-            get_logger().warning("load mongodb collection %s schema error %s", table_name, str(e))
+            get_logger().warning("schema scan load mongodb database %s collection %s schema error %s", database.name, table_name, str(e))
             return None
 
     def _analyze_document(self, doc, field_types, prefix=""):

@@ -10,6 +10,7 @@ from .loader import SchemaLoader
 class MysqlSchemaLoader(SchemaLoader):
     def load_tables(self, script_engine, database, connection):
         try:
+            get_logger().info("schema scan loading mysql database %s tables", database.name)
             table_names = self.execute(connection, "SHOW TABLES")
             if not table_names:
                 return
@@ -19,9 +20,10 @@ class MysqlSchemaLoader(SchemaLoader):
                 if not table:
                     continue
                 tables.append(table)
+            get_logger().info("schema scan loaded mysql database %s tables count %d", database.name, len(tables))
             return tables
         except Exception as e:
-            get_logger().warning("load mysql database tables error %s", str(e))
+            get_logger().warning("schema scan load mysql database %s tables error %s", database.name, str(e))
 
     def load_table(self, script_engine, database, connection, table_name):
         try:
@@ -40,7 +42,7 @@ class MysqlSchemaLoader(SchemaLoader):
                 column_types[field_name] = (self.map_column_type(field_type), None)
             return Table(table_name, "&" + database.name, column_types)
         except Exception as e:
-            get_logger().warning("load mysql table %s schema error %s", table_name, str(e))
+            get_logger().warning("schema scan load mysql database %s table %s schema error %s", database.name, table_name, str(e))
             return None
 
     def map_column_type(self, mysql_type):
