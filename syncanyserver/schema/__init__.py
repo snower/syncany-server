@@ -38,3 +38,4 @@ def load_database_schemas(script_engine, databases):
             databases[database_name] = Database(database_name, tables)
         finally:
             database.release_connection()
+            database_manager.remove(database.get_config_key())

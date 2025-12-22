@@ -2,6 +2,7 @@
 # 2023/5/5
 # create by: snower
 
+import asyncio
 import os
 from mysql_mimic.results import ColumnType
 from syncany.logger import get_logger
@@ -39,6 +40,24 @@ class DatabaseManager(BaseDatabaseManager):
             except:
                 pass
         return super(DatabaseManager, self).release(key, driver)
+
+    def remove(self, key):
+        with self.lock:
+            factory = self.factorys.pop(key, None)
+        if not factory:
+            return
+        with factory.lock:
+            while factory.drivers:
+                driver = factory.drivers.popleft()
+                driver.close()
+
+    def check_timeout(self):
+        if self.closed:
+            return
+        try:
+            super(DatabaseManager, self).check_timeout()
+        finally:
+            asyncio.get_running_loop().call_later(5 * 60, self.check_timeout)
 
 
 class Database(object):

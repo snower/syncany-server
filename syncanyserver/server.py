@@ -678,6 +678,7 @@ class Server(MysqlServer):
         self.script_engine = ScriptEngine()
         init_execute_files = self.script_engine.config.load()
         self.script_engine.config.config_logging()
+        get_logger().info("server initialization")
         self.script_engine.config.load_extensions()
         self.script_engine.manager = TaskerManager(DatabaseManager())
         self.script_engine.executor = Executor(self.script_engine.manager, self.script_engine.config.session())
@@ -775,10 +776,14 @@ class Server(MysqlServer):
         await super(Server, self).start_server(host=self.host, port=self.port,
                                                reuse_port=True if sys.platform != "win32" else None,
                                                backlog=512, **kwargs)
+        asyncio.get_running_loop().call_later(5 * 60, self.script_engine.manager.database_manager.check_timeout)
+        get_logger().info("server serving")
 
     def close(self):
+        get_logger().info("server closing")
         super(Server, self).close()
 
         if self.script_engine:
             self.script_engine.close()
         self.script_engine = None
+        get_logger().info("server closed")
