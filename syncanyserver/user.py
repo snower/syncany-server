@@ -9,10 +9,11 @@ from syncany.taskers.config import load_config
 
 
 class UserIdentityProvider(IdentityProvider):
-    def __init__(self, config_path=".", username=None, password=None):
+    def __init__(self, config_path=".", username=None, password=None, is_readonly=True):
         self.config_path = config_path
         self.username = username
         self.password = password
+        self.is_readonly = is_readonly
         self.users = None
 
     def get_plugins(self):
@@ -41,7 +42,7 @@ class UserIdentityProvider(IdentityProvider):
         if self.users is None:
             self.load_users()
         user = self.users.get(username)
-        return user["readonly"] if user and "readonly" in user else True
+        return user["readonly"] if user and "readonly" in user else self.is_readonly
 
     def has_permission(self, username, permission):
         if self.users is None:

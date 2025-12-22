@@ -649,9 +649,9 @@ class Server(MysqlServer):
     origin_compile_select_star_column = Compiler.compile_select_star_column
 
     def __init__(self, host=None, port=3306, config_path=".", username=None, password=None,
-                 executor_max_workers=5, executor_wait_timeout=120, is_scan_database=False):
+                 executor_max_workers=5, executor_wait_timeout=120, is_scan_database=False, is_readonly=True):
         super(Server, self).__init__(session_factory=self.create_session,
-                                     identity_provider=UserIdentityProvider(config_path, username, password))
+                                     identity_provider=UserIdentityProvider(config_path, username, password, is_readonly))
 
         self.host = host
         self.port = port

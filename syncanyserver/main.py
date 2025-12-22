@@ -37,12 +37,15 @@ def main():
     parser.add_argument('-w', "--executor_max_workers", dest='executor_max_workers', default=5, type=int,
                         help='Maximum number of worker threads for ThreadPoolExecutor executing SQL '
                              'queries (default: 5)')
-    parser.add_argument('-W', "--executor_wait_timeout", dest='executor_wait_timeout', default=120, type=int,
+    parser.add_argument('-t', "--executor_wait_timeout", dest='executor_wait_timeout', default=120, type=int,
                         help='The maximum waiting seconds time before the SQL query task is submitted to '
                              'the ThreadPoolExecutor for execution (default: 120 seconds)')
     parser.add_argument('-S', "--scan_database", dest='is_scan_database', nargs='?',
                         const=True, default=False, type=bool,
                         help='is scan database load table structure information (default: False)')
+    parser.add_argument('-W', "--writable", dest='writable_execute', nargs='?',
+                        const=True, default=False, type=bool,
+                        help='is writable sql can execute (default: False)')
     args = parser.parse_args()
     if args.config_path:
         os.chdir(os.path.abspath(args.config_path))
@@ -55,7 +58,7 @@ def main():
     loop.create_task(Server(args.bind, args.port, os.path.abspath(args.config_path),
                     args.username, args.password,
                     args.executor_max_workers, args.executor_wait_timeout,
-                    args.is_scan_database)
+                    args.is_scan_database, False if args.writable_execute else True)
              .serve_forever())
     loop.run_forever()
 
