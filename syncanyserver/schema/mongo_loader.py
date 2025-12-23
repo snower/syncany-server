@@ -11,6 +11,7 @@ from datetime import datetime
 from decimal import Decimal
 import uuid
 
+NoneType = type(None)
 
 class MongoSchemaLoader(SchemaLoader):
     def load_tables(self, script_engine, database, connection):
@@ -53,7 +54,7 @@ class MongoSchemaLoader(SchemaLoader):
             # 将字段信息转换为字段名到ColumnType的映射
             column_types = {}
             for field_name, type_info in field_types.items():
-                column_types[field_name] = (self._map_mongo_type(type_info), None)
+                column_types[field_name] = (self._map_mongo_type(list(type_info)), None)
             
             return Table(table_name, "&" + database.name, column_types)
         except Exception as e:
@@ -70,7 +71,7 @@ class MongoSchemaLoader(SchemaLoader):
             if field_path not in field_types:
                 field_types[field_path] = set()
             if value is None:
-                field_types[field_path].add(type(None))
+                field_types[field_path].add(NoneType)
             elif isinstance(value, dict):
                 field_types[field_path].add(dict)
             elif isinstance(value, list):
@@ -83,7 +84,18 @@ class MongoSchemaLoader(SchemaLoader):
         将MongoDB数据类型映射到ColumnType枚举值
         """
         # 取主要类型进行映射
-        primary_type = list(type_info)[0] if type_info else str
+        if not type_info:
+            primary_type = str
+        elif len(type_info) == 1:
+            primary_type = type_info[0]
+        else:
+            primary_type = type_info[0]
+            type_info = [t for t in type_info if t is not NoneType]
+            if type_info:
+                primary_type = type_info[0]
+                type_info = [t for t in type_info if isinstance(t, (list, dict))]
+                if type_info:
+                    primary_type = type_info[0]
         
         type_mapping = {
             int: ColumnType.LONG,
@@ -95,7 +107,7 @@ class MongoSchemaLoader(SchemaLoader):
             ObjectId: ColumnType.VARCHAR,  # ObjectId转为字符串
             dict: ColumnType.JSON,         # 嵌套文档转为JSON
             list: ColumnType.JSON,         # 数组转为JSON
-            type(None): ColumnType.NULL # 默认为字符串
+            NoneType: ColumnType.NULL # 默认为字符串
         }
         
         # 处理特殊的BSON类型
