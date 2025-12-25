@@ -18,11 +18,12 @@ from sqlglot import parser as sqlglot_parser
 from mysql_mimic import Session, MysqlServer
 from mysql_mimic.errors import MysqlError, ErrorCode
 from mysql_mimic.intercept import expression_to_value
-from syncany.logger import get_logger
+from syncany.logger import get_logger, set_verbose_logger
 from syncany.taskers.manager import TaskerManager
 from syncany.database.memory import MemoryDBCollection
 from syncanysql.compiler import Compiler, AssignParameter
 from syncanysql.taskers.query import QueryTasker
+from syncanysql.taskers.explain import ExplainTasker
 from syncanysql import ScriptEngine, Executor, ExecuterContext, SqlSegment, SqlParser
 from syncanysql.parser import FileParser
 from .filters import register_filters
@@ -111,7 +112,8 @@ class ServerSessionExecuterContext(ExecuterContext):
             compiler = Compiler(executor.session_config, executor.env_variables, name)
             arguments = {"@verbose": executor.env_variables.get("@verbose", False),
                          "@timeout": executor.env_variables.get("@timeout", 0),
-                         "@limit": executor.env_variables.get("@limit", 0),
+                         "@limit": executor.env_variables.get("@limit", 1 if isinstance(expression, sqlglot_expressions.Command)
+                                                                             and expression.args["this"].lower() == "explain" else 0),
                          "@batch": executor.env_variables.get("@batch", 0),
                          "@streaming": executor.env_variables.get("@streaming", False),
                          "@recovery": executor.env_variables.get("@recovery", False),
@@ -119,6 +121,19 @@ class ServerSessionExecuterContext(ExecuterContext):
                          "@insert_batch": executor.env_variables.get("@insert_batch", 0),
                          "@primary_order": False}
             tasker = compiler.compile_expression(expression, arguments)
+            if output_name and isinstance(tasker, ExplainTasker):
+                tasker.tasker.config["output"] = "&." + output_name + "::" + tasker.tasker.config["output"].split("::")[-1]
+                try:
+                    verbose_logs = []
+                    set_verbose_logger(lambda message: verbose_logs.append({"message": message}))
+                    executor.runners.extend(tasker.start(name, executor, executor.session_config, executor.manager, arguments))
+                    executor.execute()
+                    collection_name = output_name.split(".")[-1]
+                    self.present().pop_memory_datas(collection_name)
+                    self.present().push_memory_datas(collection_name, verbose_logs)
+                finally:
+                    set_verbose_logger(None)
+                return
             if output_name and isinstance(tasker, QueryTasker):
                 tasker.config["output"] = "&." + output_name + "::" + tasker.config["output"].split("::")[-1]
             executor.runners.extend(tasker.start(name, executor, executor.session_config, executor.manager, arguments))
@@ -249,7 +264,16 @@ class ServerSession(Session):
         if lower_sql == "rollback":
             self.executer_context.rollback_transaction(self)
             return [], []
+        if lower_sql.startswith("import "):
+            for expression in self.dialect().parse("use "  + sql[7:]):
+                if not expression:
+                    continue
+                return await self.query(expression, sql, attrs)
+            return None
         return await super(ServerSession, self).handle_query(sql, attrs)
+
+    async def _use_interceptor(self, expression):
+        return None
 
     def _set_variable(self, setitem):
         assignment = setitem.this
@@ -319,7 +343,8 @@ class ServerSession(Session):
 
     async def query(self, expression, sql, attrs):
         if not isinstance(expression, (sqlglot_expressions.Insert, sqlglot_expressions.Delete,
-                                       sqlglot_expressions.Select, sqlglot_expressions.Union)):
+                                       sqlglot_expressions.Select, sqlglot_expressions.Union, sqlglot_expressions.Use)) \
+                and not (isinstance(expression, sqlglot_expressions.Command) and expression.args["this"].lower() == "explain"):
             if sql.lower().startswith("flush"):
                 await self.loop.run_in_executor(self.thread_pool_executor, self.identity_provider.load_users)
                 await self.loop.run_in_executor(self.thread_pool_executor, Database.scan_databases,
@@ -345,8 +370,8 @@ class ServerSession(Session):
         if start_time + int(executor_wait_timeout) <= time.time():
             raise TimeoutError("query execute wait timeout")
 
-        if expression.args.get("into"):
-            with self.executer_context as executer_context:
+        if expression.args.get("into") or isinstance(expression, sqlglot_expressions.Use):
+            with self.executer_context.present() as executer_context:
                 executer_context.session = self
                 try:
                     executer_context.execute_expression(expression)
