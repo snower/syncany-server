@@ -13,7 +13,7 @@ class UserIdentityProvider(IdentityProvider):
         self.config_path = config_path
         self.username = username
         self.password = password
-        self.is_readonly = is_readonly
+        self.default_is_readonly = is_readonly
         self.users = None
 
     def get_plugins(self):
@@ -42,7 +42,7 @@ class UserIdentityProvider(IdentityProvider):
         if self.users is None:
             self.load_users()
         user = self.users.get(username)
-        return user["readonly"] if user and "readonly" in user else self.is_readonly
+        return user["readonly"] if user and "readonly" in user else self.default_is_readonly
 
     def has_permission(self, username, permission):
         if self.users is None:
