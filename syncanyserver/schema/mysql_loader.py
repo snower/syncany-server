@@ -39,7 +39,7 @@ class MysqlSchemaLoader(SchemaLoader):
                 field_type = column_info[1].upper()
                 
                 # 根据MySQL字段类型映射到ColumnType枚举值
-                column_types[field_name] = (self.map_column_type(field_type), None)
+                column_types[field_name] = self.map_column_type(field_type)
             return Table(table_name, "&" + database.name, column_types)
         except Exception as e:
             get_logger().warning("schema scan load mysql database %s table %s schema error %s", database.name, table_name, str(e))
@@ -53,42 +53,42 @@ class MysqlSchemaLoader(SchemaLoader):
         base_type = mysql_type.split('(')[0].upper()
         
         type_mapping = {
-            'TINYINT': ColumnType.TINY,
-            'SMALLINT': ColumnType.SHORT,
-            'MEDIUMINT': ColumnType.INT24,
-            'INT': ColumnType.LONG,
-            'INTEGER': ColumnType.LONG,
-            'BIGINT': ColumnType.LONGLONG,
-            'FLOAT': ColumnType.FLOAT,
-            'DOUBLE': ColumnType.DOUBLE,
-            'DECIMAL': ColumnType.DECIMAL,
-            'DATE': ColumnType.DATE,
-            'TIME': ColumnType.TIME,
-            'DATETIME': ColumnType.DATETIME,
-            'TIMESTAMP': ColumnType.TIMESTAMP,
-            'YEAR': ColumnType.YEAR,
-            'CHAR': ColumnType.STRING,
-            'VARCHAR': ColumnType.VARCHAR,
-            'TEXT': ColumnType.BLOB,
-            'TINYTEXT': ColumnType.TINY_BLOB,
-            'MEDIUMTEXT': ColumnType.MEDIUM_BLOB,
-            'LONGTEXT': ColumnType.LONG_BLOB,
-            'BINARY': ColumnType.STRING,
-            'VARBINARY': ColumnType.VARCHAR,
-            'BLOB': ColumnType.BLOB,
-            'TINYBLOB': ColumnType.TINY_BLOB,
-            'MEDIUMBLOB': ColumnType.MEDIUM_BLOB,
-            'LONGBLOB': ColumnType.LONG_BLOB,
-            'ENUM': ColumnType.ENUM,
-            'SET': ColumnType.SET,
-            'JSON': ColumnType.JSON,
-            'BIT': ColumnType.BIT,
-            'BOOL': ColumnType.BOOL,
-            'BOOLEAN': ColumnType.BOOL,
+            'TINYINT': (ColumnType.TINY, "int"),
+            'SMALLINT': (ColumnType.SHORT, "int"),
+            'MEDIUMINT': (ColumnType.INT24, "int"),
+            'INT': (ColumnType.LONG, "int"),
+            'INTEGER': (ColumnType.LONG, "int"),
+            'BIGINT': (ColumnType.LONGLONG, "int"),
+            'FLOAT': (ColumnType.FLOAT, "float"),
+            'DOUBLE': (ColumnType.DOUBLE, "float"),
+            'DECIMAL': (ColumnType.DECIMAL, "decimal"),
+            'DATE': (ColumnType.DATE, "date"),
+            'TIME': (ColumnType.TIME, "time"),
+            'DATETIME': (ColumnType.DATETIME, "datetime"),
+            'TIMESTAMP': (ColumnType.TIMESTAMP, "datetime"),
+            'YEAR': (ColumnType.YEAR, "int"),
+            'CHAR': (ColumnType.STRING, "str"),
+            'VARCHAR': (ColumnType.VARCHAR, "str"),
+            'TEXT': (ColumnType.BLOB, "str"),
+            'TINYTEXT': (ColumnType.TINY_BLOB, "str"),
+            'MEDIUMTEXT': (ColumnType.MEDIUM_BLOB, "str"),
+            'LONGTEXT': (ColumnType.LONG_BLOB, "str"),
+            'BINARY': (ColumnType.STRING, "bytes"),
+            'VARBINARY': (ColumnType.VARCHAR, "bytes"),
+            'BLOB': (ColumnType.BLOB, "bytes"),
+            'TINYBLOB': (ColumnType.TINY_BLOB, "bytes"),
+            'MEDIUMBLOB': (ColumnType.MEDIUM_BLOB, "bytes"),
+            'LONGBLOB': (ColumnType.LONG_BLOB, "bytes"),
+            'ENUM': (ColumnType.ENUM, "int"),
+            'SET': (ColumnType.SET, None),
+            'JSON': (ColumnType.JSON, None),
+            'BIT': (ColumnType.BIT, None),
+            'BOOL': (ColumnType.BOOL, "bool"),
+            'BOOLEAN': (ColumnType.BOOL, "bool"),
         }
         
         # 默认返回字符串类型
-        return type_mapping.get(base_type, ColumnType.VARCHAR)
+        return type_mapping.get(base_type, (ColumnType.VARCHAR, "str"))
 
     def execute(self, connection, sql):
         cursor = connection.cursor()

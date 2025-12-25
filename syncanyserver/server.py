@@ -468,9 +468,10 @@ class ServerSession(Session):
                 if isinstance(table_expression, sqlglot_expressions.Table):
                     database_name = table_expression.args["db"].name if table_expression.args.get("db") else None
                     table_name = table_expression.args["this"].name
-                    if self.databases.get(database_name or self.database) \
-                            and self.databases.get(database_name or self.database).get_table(table_name):
-                        tables[database_name, table_name].append(table_expression)
+                    if self.databases.get(database_name or self.database):
+                        table = self.databases.get(database_name or self.database).get_table(table_name)
+                        if table and not table.filename.startswith("&"):
+                            tables[database_name, table_name].append(table_expression)
         if isinstance(expression, sqlglot_expressions.Insert):
             if isinstance(expression.args["expression"], (sqlglot_expressions.Select, sqlglot_expressions.Union)):
                 self.parse_join_tables(expression.args["expression"], tables)
@@ -724,7 +725,9 @@ class Server(MysqlServer):
                 return column_info
             if column_info["column_name"] not in table_schema:
                 return column_info
-            column_info["typing_filters"] = [table_schema[column_info["column_name"]][1]]
+            typing_filter = table_schema[column_info["column_name"]][1]
+            if typing_filter:
+                column_info["typing_filters"] = [typing_filter]
             return column_info
 
         def compile_select_star_column(compiler, expression, config, arguments, primary_table, join_tables):

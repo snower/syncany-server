@@ -43,7 +43,7 @@ class MongoSchemaLoader(SchemaLoader):
             if not sample_docs:
                 # 如果没有数据，则创建一个空表
                 return Table(table_name, "&" + database.name, {
-                    "_id": (ColumnType.VARCHAR, None)
+                    "_id": (ColumnType.VARCHAR, "objectid")
                 })
             
             # 分析所有文档的字段类型
@@ -54,7 +54,10 @@ class MongoSchemaLoader(SchemaLoader):
             # 将字段信息转换为字段名到ColumnType的映射
             column_types = {}
             for field_name, type_info in field_types.items():
-                column_types[field_name] = (self._map_mongo_type(list(type_info)), None)
+                if field_name == "_id":
+                    column_types[field_name] = (ColumnType.VARCHAR, "objectid")
+                else:
+                    column_types[field_name] = self._map_mongo_type(list(type_info))
             
             return Table(table_name, "&" + database.name, column_types)
         except Exception as e:
@@ -85,40 +88,44 @@ class MongoSchemaLoader(SchemaLoader):
         """
         # 取主要类型进行映射
         if not type_info:
-            primary_type = str
-        elif len(type_info) == 1:
+            return (ColumnType.VARCHAR, None)
+        if len(type_info) == 1:
             primary_type = type_info[0]
+            isMixedType = primary_type is NoneType
         else:
             primary_type = type_info[0]
+            isMixedType = primary_type is NoneType
             type_info = [t for t in type_info if t is not NoneType]
             if type_info:
                 primary_type = type_info[0]
+                if len(type_info) == 1:
+                    isMixedType = False
                 type_info = [t for t in type_info if isinstance(t, (list, dict))]
                 if type_info:
                     primary_type = type_info[0]
         
         type_mapping = {
-            int: ColumnType.LONG,
-            float: ColumnType.DOUBLE,
-            str: ColumnType.VARCHAR,
-            bool: ColumnType.BOOL,
-            datetime: ColumnType.DATETIME,
-            bytes: ColumnType.BLOB,
-            ObjectId: ColumnType.VARCHAR,  # ObjectId转为字符串
-            dict: ColumnType.JSON,         # 嵌套文档转为JSON
-            list: ColumnType.JSON,         # 数组转为JSON
-            NoneType: ColumnType.NULL # 默认为字符串
+            int: (ColumnType.LONG, None if isMixedType else "int"),
+            float: (ColumnType.DOUBLE, None if isMixedType else "float"),
+            str: (ColumnType.VARCHAR, None if isMixedType else "str"),
+            bool: (ColumnType.BOOL, None if isMixedType else "bool"),
+            datetime: (ColumnType.DATETIME, None if isMixedType else "datetime"),
+            bytes: (ColumnType.BLOB, None if isMixedType else "bytes"),
+            ObjectId: (ColumnType.VARCHAR, None if isMixedType else "objectid"),  # ObjectId转为字符串
+            dict: (ColumnType.JSON, None),         # 嵌套文档转为JSON
+            list: (ColumnType.JSON, None),         # 数组转为JSON
+            NoneType: (ColumnType.NULL, None), # 默认为字符串
         }
         
         # 处理特殊的BSON类型
         if primary_type == Binary:
-            return ColumnType.BLOB
+            return (ColumnType.BLOB, None if isMixedType else "bytes")
         elif primary_type == Decimal:
-            return ColumnType.DECIMAL
+            return (ColumnType.DECIMAL, None if isMixedType else "decimal")
         elif primary_type == uuid.UUID:
-            return ColumnType.VARCHAR
+            return (ColumnType.VARCHAR, None if isMixedType else "uuid")
         elif primary_type == Timestamp:
-            return ColumnType.TIMESTAMP
+            return (ColumnType.TIMESTAMP, None if isMixedType else "datetime")
         else:
             # 默认返回VARCHAR类型
             return type_mapping.get(primary_type, ColumnType.VARCHAR)
