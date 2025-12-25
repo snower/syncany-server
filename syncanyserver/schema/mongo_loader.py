@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 # 2025/11/21
 # create by: snower
-import bson
 
 from syncany.logger import get_logger
 from ..table import Table
 from .loader import SchemaLoader
 from mysql_mimic.types import ColumnType
-from bson import ObjectId, Binary, Timestamp, Int64
+from bson import ObjectId, Binary, Timestamp, Int64, Decimal128
 from datetime import datetime
 from decimal import Decimal
 import uuid
@@ -118,6 +117,7 @@ class MongoSchemaLoader(SchemaLoader):
             list: (ColumnType.JSON, None),         # 数组转为JSON
             NoneType: (ColumnType.NULL, None), # 默认为字符串
             Int64: (ColumnType.LONG, None if isMixedType else "int"),
+            Decimal128: (ColumnType.DECIMAL, None if isMixedType else "decimal"),
         }
         
         # 处理特殊的BSON类型
