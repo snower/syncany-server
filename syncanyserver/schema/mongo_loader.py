@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 # 2025/11/21
 # create by: snower
+import bson
 
 from syncany.logger import get_logger
 from ..table import Table
 from .loader import SchemaLoader
 from mysql_mimic.types import ColumnType
-from bson import ObjectId, Binary, Timestamp
+from bson import ObjectId, Binary, Timestamp, Int64
 from datetime import datetime
 from decimal import Decimal
 import uuid
@@ -106,6 +107,7 @@ class MongoSchemaLoader(SchemaLoader):
         
         type_mapping = {
             int: (ColumnType.LONG, None if isMixedType else "int"),
+            Decimal: (ColumnType.DECIMAL, None if isMixedType else "decimal"),
             float: (ColumnType.DOUBLE, None if isMixedType else "float"),
             str: (ColumnType.VARCHAR, None if isMixedType else "str"),
             bool: (ColumnType.BOOL, None if isMixedType else "bool"),
@@ -115,6 +117,7 @@ class MongoSchemaLoader(SchemaLoader):
             dict: (ColumnType.JSON, None),         # 嵌套文档转为JSON
             list: (ColumnType.JSON, None),         # 数组转为JSON
             NoneType: (ColumnType.NULL, None), # 默认为字符串
+            Int64: (ColumnType.LONG, None if isMixedType else "int"),
         }
         
         # 处理特殊的BSON类型
@@ -128,4 +131,6 @@ class MongoSchemaLoader(SchemaLoader):
             return (ColumnType.TIMESTAMP, None if isMixedType else "datetime")
         else:
             # 默认返回VARCHAR类型
-            return type_mapping.get(primary_type, ColumnType.VARCHAR)
+            if primary_type not in type_mapping:
+                get_logger().warning("schema scan load mongodb database unknown type %s", primary_type)
+            return type_mapping.get(primary_type, (ColumnType.VARCHAR, None))

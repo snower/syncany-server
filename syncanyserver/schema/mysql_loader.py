@@ -88,6 +88,8 @@ class MysqlSchemaLoader(SchemaLoader):
         }
         
         # 默认返回字符串类型
+        if base_type not in type_mapping:
+            get_logger().warning("schema scan load mysql database unknown type %s", base_type)
         return type_mapping.get(base_type, (ColumnType.VARCHAR, None))
 
     def execute(self, connection, sql):
