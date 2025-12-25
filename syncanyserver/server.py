@@ -25,6 +25,7 @@ from syncanysql.compiler import Compiler, AssignParameter
 from syncanysql.taskers.query import QueryTasker
 from syncanysql import ScriptEngine, Executor, ExecuterContext, SqlSegment, SqlParser
 from syncanysql.parser import FileParser
+from .filters import register_filters
 from .user import UserIdentityProvider
 from .database import DatabaseManager, Database
 
@@ -676,6 +677,7 @@ class Server(MysqlServer):
     def setup_script_engine(self):
         if self.script_engine is not None:
             return
+        register_filters()
         self.script_engine = ScriptEngine()
         init_execute_files = self.script_engine.config.load()
         self.script_engine.config.config_logging()
@@ -703,17 +705,18 @@ class Server(MysqlServer):
             compiler.server_schemas[table_info["table_name"]] = table_info
             return table_info
 
-        def parse_column(compiler, *args):
-            column_info = Server.origin_parse_column(compiler, *args)
-            if not isinstance(column_info, dict):
+        def parse_column(compiler, expression, config, arguments, primary_table):
+            column_info = Server.origin_parse_column(compiler, expression, config, arguments, primary_table)
+            if not isinstance(column_info, dict) or column_info.get("typing_filters"):
                 return column_info
-            if column_info.get("typing_filters") or not column_info.get("table_name"):
+            table_name = column_info.get("table_name") or (primary_table.get("table_name") if primary_table and isinstance(primary_table, dict) else None)
+            if not table_name:
                 return column_info
-            if hasattr(compiler, "server_schemas") and column_info["table_name"] in compiler.server_schemas:
-                table_info = compiler.server_schemas[column_info["table_name"]]
+            if hasattr(compiler, "server_schemas") and table_name in compiler.server_schemas:
+                table_info = compiler.server_schemas[table_name]
                 db_name, table_name = table_info["db"], table_info["name"]
             else:
-                table_info = column_info["table_name"].split(".")
+                table_info = table_name.split(".")
                 if len(table_info) <= 1:
                     return column_info
                 db_name, table_name = table_info[0], table_info[1]
@@ -727,6 +730,8 @@ class Server(MysqlServer):
             typing_filter = table_schema[column_info["column_name"]][1]
             if typing_filter:
                 column_info["typing_filters"] = [typing_filter]
+                if column_info["typing_name"] and "|" not in column_info["typing_name"]:
+                    column_info["typing_name"] = column_info["typing_name"] + "|" + typing_filter
             return column_info
 
         def compile_select_star_column(compiler, expression, config, arguments, primary_table, join_tables):
