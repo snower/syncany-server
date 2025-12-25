@@ -264,16 +264,7 @@ class ServerSession(Session):
         if lower_sql == "rollback":
             self.executer_context.rollback_transaction(self)
             return [], []
-        if lower_sql.startswith("import "):
-            for expression in self.dialect().parse("use "  + sql[7:]):
-                if not expression:
-                    continue
-                return await self.query(expression, sql, attrs)
-            return None
         return await super(ServerSession, self).handle_query(sql, attrs)
-
-    async def _use_interceptor(self, expression):
-        return None
 
     def _set_variable(self, setitem):
         assignment = setitem.this
@@ -344,7 +335,8 @@ class ServerSession(Session):
     async def query(self, expression, sql, attrs):
         if not isinstance(expression, (sqlglot_expressions.Insert, sqlglot_expressions.Delete,
                                        sqlglot_expressions.Select, sqlglot_expressions.Union, sqlglot_expressions.Use)) \
-                and not (isinstance(expression, sqlglot_expressions.Command) and expression.args["this"].lower() == "explain"):
+                and not (isinstance(expression, sqlglot_expressions.Command) and expression.args["this"].lower() == "explain") \
+                and not (isinstance(expression, sqlglot_expressions.Alias) and expression.args["this"].name.lower() == "import"):
             if sql.lower().startswith("flush"):
                 await self.loop.run_in_executor(self.thread_pool_executor, self.identity_provider.load_users)
                 await self.loop.run_in_executor(self.thread_pool_executor, Database.scan_databases,
@@ -370,7 +362,8 @@ class ServerSession(Session):
         if start_time + int(executor_wait_timeout) <= time.time():
             raise TimeoutError("query execute wait timeout")
 
-        if expression.args.get("into") or isinstance(expression, sqlglot_expressions.Use):
+        if (expression.args.get("into") or isinstance(expression, sqlglot_expressions.Use) or
+                (isinstance(expression, sqlglot_expressions.Alias) and expression.args["this"].name.lower() == "import")):
             with self.executer_context.present() as executer_context:
                 executer_context.session = self
                 try:
