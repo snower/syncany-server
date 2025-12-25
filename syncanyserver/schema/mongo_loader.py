@@ -54,11 +54,9 @@ class MongoSchemaLoader(SchemaLoader):
             # 将字段信息转换为字段名到ColumnType的映射
             column_types = {}
             for field_name, type_info in field_types.items():
-                if field_name == "_id":
-                    column_types[field_name] = (ColumnType.VARCHAR, "objectid")
-                else:
-                    column_types[field_name] = self._map_mongo_type(list(type_info))
-            
+                column_types[field_name] = self._map_mongo_type(list(type_info))
+            if "_id" not in column_types:
+                column_types["_id"] = (ColumnType.VARCHAR, "objectid")
             return Table(table_name, "&" + database.name, column_types)
         except Exception as e:
             get_logger().warning("schema scan load mongodb database %s collection %s schema error %s", database.name, table_name, str(e))
