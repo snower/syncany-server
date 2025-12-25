@@ -2,6 +2,7 @@
 # 2025/11/21
 # create by: snower
 
+import os
 from syncany.logger import get_logger
 from ..table import Table
 from .loader import SchemaLoader
@@ -38,7 +39,7 @@ class MongoSchemaLoader(SchemaLoader):
         try:
             # 获取前10行数据来分析结构
             db = connection[database.db_name]
-            sample_docs = list(db[table_name].find().limit(10))
+            sample_docs = list(db[table_name].find().limit(int(os.environ.get("SYNCANY_MONGO_SCAN_SIZE", 100))))
             
             if not sample_docs:
                 # 如果没有数据，则创建一个空表
