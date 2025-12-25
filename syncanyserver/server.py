@@ -690,7 +690,6 @@ class Server(MysqlServer):
                 executor.execute()
         self.thread_pool_executor = ThreadPoolExecutor(self.executor_max_workers)
         self.identity_provider.load_users()
-        Database.scan_databases(self.config_path, self.script_engine, self.databases, self.is_scan_database)
 
     async def start_server(self, **kwargs):
         self.setup_script_engine()
@@ -776,6 +775,8 @@ class Server(MysqlServer):
         Compiler.parse_table = parse_table
         Compiler.parse_column = parse_column
         Compiler.compile_select_star_column = compile_select_star_column
+
+        Database.scan_databases(self.config_path, self.script_engine, self.databases, self.is_scan_database)
         await super(Server, self).start_server(host=self.host, port=self.port,
                                                reuse_port=True if sys.platform != "win32" else None,
                                                backlog=512, **kwargs)
