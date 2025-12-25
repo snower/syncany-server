@@ -88,7 +88,7 @@ class MysqlSchemaLoader(SchemaLoader):
         }
         
         # 默认返回字符串类型
-        return type_mapping.get(base_type, (ColumnType.VARCHAR, "str"))
+        return type_mapping.get(base_type, (ColumnType.VARCHAR, None))
 
     def execute(self, connection, sql):
         cursor = connection.cursor()
