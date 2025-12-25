@@ -38,7 +38,7 @@ setup(
     install_requires=[
         "pyyaml>=5.1.2",
         "sqlglot>=11.5.5,<12",
-        "syncanysql>=0.1.26",
+        "syncanysql>=0.1.27",
         "mysql-mimic>=2.2.3,<2.3"
     ],
     extras_require={
