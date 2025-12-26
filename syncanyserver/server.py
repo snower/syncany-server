@@ -162,6 +162,25 @@ class MySQL(sqlglot_dialects.MySQL):
             expression = self._parse_conjunction() or self._parse_function() or self._parse_id_var()
             return self.expression(AssignParameter, this=this, expression=expression, wrapped=wrapped)
 
+        def _parse_update(self):
+            table_expressions = self._parse_csv(lambda: self._parse_table(alias_tokens=self.UPDATE_ALIAS_TOKENS))
+            for table_expression in table_expressions[1:]:
+                table_expressions[0].append("table_expressions", table_expression)
+            while self._match(sqlglot_parser.TokenType.JOIN):
+                join_expression = self._parse_join(True)
+                if join_expression:
+                    table_expressions[0].append("join_expressions", join_expression)
+            return self.expression(
+                sqlglot_expressions.Update,
+                **{  # type: ignore
+                    "this": table_expressions[0],
+                    "expressions": self._match(sqlglot_parser.TokenType.SET) and self._parse_csv(self._parse_equality),
+                    "from": self._parse_from(),
+                    "where": self._parse_where(),
+                    "returning": self._parse_returning(),
+                },
+            )
+
         def _parse_limit(self, this=None, top=False):
             if top or not self._match(sqlglot_parser.TokenType.LIMIT, False):
                 return sqlglot_parser.Parser._parse_limit(self, this, top)
@@ -203,6 +222,17 @@ class MySQL(sqlglot_dialects.MySQL):
             this = self.sql(expression, "this")
             this = f"{{{this}}}" if expression.args.get("wrapped") else f"{this}"
             return f"""{self.PARAMETER_TOKEN}{this} := {self.sql(expression, "expression")}"""
+
+        def update_sql(self, expression):
+            this = ", ".join([self.sql(expression, "this")] + [self.sql(table_expression) for table_expression in expression.args["this"].args["table_expressions"]]) \
+                if expression.args["this"].args.get("table_expressions") else self.sql(expression, "this")
+            join_sql = self.expressions(expression.args.get("this"), "join_expressions", flat=True, sep="")
+            set_sql = self.expressions(expression, flat=True)
+            from_sql = self.sql(expression, "from")
+            where_sql = self.sql(expression, "where")
+            returning = self.sql(expression, "returning")
+            sql = f"UPDATE {this} {join_sql} SET {set_sql}{from_sql}{where_sql}{returning}"
+            return self.prepend_ctes(expression, sql)
 
 
 class ServerSession(Session):
@@ -726,7 +756,7 @@ class Server(MysqlServer):
             compiler.server_schemas[table_info["table_name"]] = table_info
             return table_info
 
-        def parse_column(compiler, expression, config, arguments, primary_table):
+        def parse_column(compiler, expression, config, arguments, primary_table=None):
             column_info = Server.origin_parse_column(compiler, expression, config, arguments, primary_table)
             if not isinstance(column_info, dict) or column_info.get("typing_filters"):
                 return column_info
