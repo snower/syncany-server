@@ -8,10 +8,11 @@ from syncany.filters import IntFilter, FloatFilter, StringFilter, BytesFilter, B
 
 
 class Table(object):
-    def __init__(self, name, filename, schema):
+    def __init__(self, name, filename, schema, primary_keys=None):
         self.name = name
         self.filename = filename
         self.schema = schema
+        self.primary_keys = primary_keys
 
     @classmethod
     def parse_schema(cls, tasker):

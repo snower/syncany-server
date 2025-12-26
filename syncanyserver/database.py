@@ -130,11 +130,15 @@ class Database(object):
                             if not isinstance(tasker, QueryTasker):
                                 continue
                             if ("&.--." + table_name) in tasker.config["output"]:
-                                table_name = tasker.config["output"].split("&.--.")[-1].split("::")[0]
-                                tables.append(Table(table_name, filename, Table.parse_schema(tasker)))
+                                output_info = tasker.config["output"].split("&.--.")[-1].split("::")
+                                table_name = output_info[0]
+                                primary_keys = output_info[1].split(" ")[0].split("+") if len(output_info) >= 2 else None
+                                tables.append(Table(table_name, filename, Table.parse_schema(tasker), primary_keys))
                             elif tasker.reduce_config and ("&.--." + table_name) in tasker.reduce_config["output"]:
-                                table_name = tasker.reduce_config["output"].split("&.--.")[-1].split("::")[0]
-                                tables.append(Table(table_name, filename, Table.parse_schema(tasker)))
+                                output_info = tasker.reduce_config["output"].split("&.--.")[-1].split("::")
+                                table_name = output_info[0]
+                                primary_keys = output_info[1].split(" ")[0].split("+") if len(output_info) >= 2 else None
+                                tables.append(Table(table_name, filename, Table.parse_schema(tasker), primary_keys))
                         finally:
                             tasker.tasker.close()
                 except Exception as e:

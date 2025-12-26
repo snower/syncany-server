@@ -58,7 +58,7 @@ class MongoSchemaLoader(SchemaLoader):
                 column_types[field_name] = self._map_mongo_type(list(type_info))
             if "_id" not in column_types:
                 column_types["_id"] = (ColumnType.VARCHAR, "objectid")
-            return Table(table_name, "&" + database.name, column_types)
+            return Table(table_name, "&" + database.name, column_types, ["_id"])
         except Exception as e:
             get_logger().warning("schema scan load mongodb database %s collection %s schema error %s", database.name, table_name, str(e))
             return None

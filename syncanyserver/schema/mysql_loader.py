@@ -32,15 +32,22 @@ class MysqlSchemaLoader(SchemaLoader):
             if not columns_info:
                 return None
             
-            # 将字段信息转换为字段名到ColumnType的映射
+            # 将字段信息转换为字段名到ColumnType的映射，并识别主键
             column_types = {}
+            primary_keys = []
             for column_info in columns_info:
-                field_name = column_info[0]
-                field_type = column_info[1].upper()
+                field_name = column_info[0]  # 第一列是字段名
+                field_type = column_info[1].upper()  # 第二列是字段类型
+                field_key = column_info[3]  # 第四列是Key信息
                 
                 # 根据MySQL字段类型映射到ColumnType枚举值
                 column_types[field_name] = self.map_column_type(field_type)
-            return Table(table_name, "&" + database.name, column_types)
+                
+                # 检查是否为主键
+                if field_key == 'PRI':
+                    primary_keys.append(field_name)
+            
+            return Table(table_name, "&" + database.name, column_types, primary_keys)
         except Exception as e:
             get_logger().warning("schema scan load mysql database %s table %s schema error %s", database.name, table_name, str(e))
             return None

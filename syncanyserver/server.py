@@ -333,7 +333,7 @@ class ServerSession(Session):
             return super(ServerSession, self)._static_query_interceptor(expression)
 
     async def query(self, expression, sql, attrs):
-        if not isinstance(expression, (sqlglot_expressions.Insert, sqlglot_expressions.Delete,
+        if not isinstance(expression, (sqlglot_expressions.Insert, sqlglot_expressions.Update, sqlglot_expressions.Delete,
                                        sqlglot_expressions.Select, sqlglot_expressions.Union, sqlglot_expressions.Use)) \
                 and not (isinstance(expression, sqlglot_expressions.Command) and expression.args["this"].lower() == "explain") \
                 and not (isinstance(expression, sqlglot_expressions.Alias) and expression.args["this"].name.lower() == "import"):
@@ -381,8 +381,8 @@ class ServerSession(Session):
             if joins_tables:
                 self.execute_tables(executer_context, joins_tables, self.parse_joins_variable_sqls(expression))
 
-            if isinstance(expression, sqlglot_expressions.Insert):
-                database_name, table_name = self.parse_insert_table(expression)
+            if isinstance(expression, (sqlglot_expressions.Insert, sqlglot_expressions.Update, sqlglot_expressions.Delete)):
+                database_name, table_name = self.parse_insert_update_delete_table(expression)
                 if self.identity_provider.is_readonly(self.username):
                     if not self.identity_provider.has_permission(self.username, "temporary_memory_table"):
                         raise MysqlError("no temporary_memory_table permission", code=ErrorCode.ACCESS_DENIED_ERROR)
@@ -398,9 +398,6 @@ class ServerSession(Session):
                     datas = executer_context.pop_memory_datas(table_name)
                     if datas:
                         self.executer_context.commit_memory_datas(table_name, datas)
-                return [], []
-            if isinstance(expression, sqlglot_expressions.Delete):
-                executer_context.execute_expression(expression)
                 return [], []
 
             collection_name = "__session_execute_%d_%d" % (id(self), self.execute_index)
@@ -499,8 +496,8 @@ class ServerSession(Session):
             self.parse_join_tables(expression.args["expression"], tables)
         return tables
 
-    def parse_insert_table(self, expression):
-        if not isinstance(expression, sqlglot_expressions.Insert):
+    def parse_insert_update_delete_table(self, expression):
+        if not isinstance(expression, (sqlglot_expressions.Insert, sqlglot_expressions.Update, sqlglot_expressions.Delete)):
             return None, None
         if isinstance(expression.args["this"], sqlglot_expressions.Schema):
             expression = expression.args["this"]
@@ -720,6 +717,12 @@ class Server(MysqlServer):
                 return table_info
             if not hasattr(compiler, "server_schemas"):
                 setattr(compiler, "server_schemas", {})
+            if not table_info.get("primary_keys"):
+                db_name, table_name = table_info["db"], table_info["name"]
+                if db_name in self.databases:
+                    table = self.databases[db_name].get_table(table_name)
+                    if table is not None and table.primary_keys:
+                        table_info["primary_keys"] = table.primary_keys
             compiler.server_schemas[table_info["table_name"]] = table_info
             return table_info
 
