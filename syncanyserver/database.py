@@ -98,6 +98,7 @@ class Database(object):
             dirpath = config_path if dirname == config_path else os.path.join(config_path, dirname)
             if not os.path.isdir(dirpath):
                 continue
+            get_logger().info("load database scan dir %s", dirpath)
             database_name = os.path.basename(config_path) if dirname == config_path else dirname
             if not database_name.isidentifier():
                 database_name = "".join([c if c.isidentifier() else "_" for c in database_name])
@@ -118,6 +119,7 @@ class Database(object):
             tables = []
             for table_name, filename in sql_filenames:
                 try:
+                    get_logger().info("load database sql file parse %s %s", database_name, filename)
                     sql_parser = FileParser(filename)
                     sqls = sql_parser.load()
                     executor = Executor(script_engine.manager, script_engine.executor.session_config.session(),
@@ -134,11 +136,15 @@ class Database(object):
                                 table_name = output_info[0]
                                 primary_keys = output_info[1].split(" ")[0].split("+") if len(output_info) >= 2 else None
                                 tables.append(Table(table_name, filename, Table.parse_schema(tasker), primary_keys))
+                                get_logger().info("load database append table %s %s %s", database_name, table_name, filename)
                             elif tasker.reduce_config and ("&.--." + table_name) in tasker.reduce_config["output"]:
                                 output_info = tasker.reduce_config["output"].split("&.--.")[-1].split("::")
                                 table_name = output_info[0]
                                 primary_keys = output_info[1].split(" ")[0].split("+") if len(output_info) >= 2 else None
                                 tables.append(Table(table_name, filename, Table.parse_schema(tasker), primary_keys))
+                                get_logger().info("load database append table %s %s %s", database_name, table_name, filename)
+                            else:
+                                get_logger().warning("load database file no output table memory db %s %s %s", database_name, table_name, filename)
                         finally:
                             tasker.tasker.close()
                 except Exception as e:
@@ -146,15 +152,18 @@ class Database(object):
 
             for table_name, filename in meta_filenames:
                 try:
+                    get_logger().info("load database meta file parse %s %s", database_name, filename)
                     table_meta = load_config(filename)
                     if not isinstance(table_meta, dict) or "schema" not in table_meta or not isinstance(table_meta["schema"], dict):
                         continue
                     try:
                         table = [t for t in tables if t.name == table_name][0]
                         table.schema.clear()
+                        get_logger().info("load database update table %s %s %s", database_name, table_name, filename)
                     except:
                         table = Table(table_name, None, {})
                         tables.append(table)
+                        get_logger().info("load database append table %s %s %s", database_name, table_name, filename)
                     for column_name, column_type in table_meta["schema"].items():
                         if not column_type or not isinstance(column_type, str):
                             table.schema[column_name] = (ColumnType.VARCHAR, None)
