@@ -19,7 +19,7 @@ from .table import Table
 
 class DatabaseManager(BaseDatabaseManager):
     def acquire(self, key):
-        if key == "MemoryDB::--":
+        if key.startswith("MemoryDB://") and "name=--" in key:
             try:
                 executer_context = ExecuterContext.current()
                 if executer_context:
@@ -31,7 +31,7 @@ class DatabaseManager(BaseDatabaseManager):
         return super(DatabaseManager, self).acquire(key)
 
     def release(self, key, driver):
-        if key == "MemoryDB::--":
+        if key.startswith("MemoryDB://") and "name=--" in key:
             try:
                 executer_context = ExecuterContext.current()
                 if executer_context and hasattr(executer_context, "memory_database_collection") \
